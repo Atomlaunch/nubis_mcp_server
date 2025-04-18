@@ -1,5 +1,5 @@
 {
-  "name": "@nubis/mcp-server",
+  "name": "@lil2good/nubis-mcp-server",
   "version": "1.0.0",
   "description": "MCP server for Nubis task management",
   "main": "dist/index.js",

@@ -1,33 +1,87 @@
 # Nubis MCP Server
 
-This MCP server exposes an endpoint to fetch `pm_tasks` from Supabase by `workspaceID` (branch_id).
+## What is MCP?
 
-## Features
-- REST API: `GET /tasks/:workspaceID` returns all tasks for a workspace (branch).
-- Strict TypeScript typing and project conventions.
-- Ready for MCP extension (tools/resources).
+The Model Context Protocol (MCP) is a standardized interface that allows AI models to access external tools and data sources. This server implements the MCP specification to provide AI assistants with access to Nubis task management functionality.
 
-## Setup
-1. Copy `.env.example` to `.env` and fill in your Supabase credentials:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the server:
-   ```bash
-   npm run dev
-   ```
+## Installation
 
-## Endpoint
-- `GET /tasks/:workspaceID` — Fetch all tasks for the given workspace (branch).
+```bash
+npx -y @lil2good/nubis-mcp-server@latest --workspaceID <your-workspace-id> --access-token <your-api-key>
+```
 
-## Environment Variables
-- `SUPABASE_URL`: Your Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY`: Service Role Key (keep secret!)
-- `PORT`: (optional) Port for the server (default: 3000)
+## Available Tools
 
----
+This MCP server provides the following tools:
 
-This server is scaffolded for MCP compatibility and can be extended to expose MCP tools, resources, and prompts as needed.
+### `get_tasks`
+Retrieves a list of tasks for a workspace with optional filtering by board.
+
+```
+Parameters:
+- limit: number (optional, default: 5)
+- board: 'bugs' | 'backlog' | 'priority' | 'in-progress' | 'reviewing' | 'completed' (optional)
+```
+
+### `get_task`
+Gets detailed information about a specific task by ID.
+
+```
+Parameters:
+- taskID: string (required)
+```
+
+### `get_task_images`
+Retrieves images associated with a specific task.
+
+```
+Parameters:
+- taskID: string (required)
+```
+
+### `work_on_task`
+Moves a task to the "in-progress" board and returns task details.
+
+```
+Parameters:
+- taskID: string (required)
+```
+
+### `explain_setup`
+Provides information about what needs to be done to implement a feature based on task details.
+
+```
+Parameters:
+- taskID: string (required)
+```
+
+### `move_task`
+Moves a task to a different board.
+
+```
+Parameters:
+- taskID: string (required)
+- board: 'backlog' | 'in-progress' | 'reviewing' | 'completed' (required)
+```
+
+## Configuration in AI Tools
+
+To use this MCP server with AI assistants that support MCP, add the following configuration:
+
+```json
+"nubis": {
+  "command": "npx",
+  "args": [
+    "-y",
+    "@lil2good/nubis-mcp-server@latest",
+    "--workspaceID",
+    "your-workspace-id",
+    "--access-token",
+    "your-api-key"
+  ]
+}
+```
+
+## Security
+
+This MCP server uses a secure middleware architecture that keeps your API credentials safe. All privileged operations are performed through a secure server, while the MCP interface remains lightweight and secure for public distribution.
