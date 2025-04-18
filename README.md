@@ -76,7 +76,7 @@ To use this MCP server with AI assistants that support MCP, add the following co
     "@lil2good/nubis-mcp-server@latest",
     "--workspaceID",
     "your-workspace-id",
-    "--access-token",
+    "--apiKey",
     "your-api-key"
   ]
 }

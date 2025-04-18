@@ -28,7 +28,7 @@ const server = new McpServer({
 
 // Helper to get results from middleware
 async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, schema: any}) {
-  const response = await fetch('http://localhost:4000/' + endpoint, {
+  const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -87,8 +87,9 @@ server.tool(
           type: "text",
           text: [
             `==============`,
-            `### ${task.title} #${task.task_number}`,
+            `### ${task.title}`,
             `**Task ID:** ${task.id}`,
+            `**Task Number:** ${task.task_number}`,
             `**Board:** ${task.board}`,
             `**Description:** ${task.description ? task.description : "_No description_"}`,
             task.images && task.images.length > 0
