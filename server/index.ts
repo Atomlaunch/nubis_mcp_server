@@ -98,8 +98,8 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
  * Return task by ID
  */
 app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, taskID } = req.body as { workspaceId: string; apiKey: string; taskID: string };
-  console.log({ workspaceId, apiKey, taskID });
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
   const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
   if (!checkUserApiKeyResult) {
     res.status(401).json({ error: "Unauthorized" });
@@ -109,7 +109,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('pm_tasks')
     .select('*')
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
   if (error) {
@@ -123,8 +123,8 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
  * Return task images by ID
  */
 app.post("/get_task_images", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, taskID } = req.body as { workspaceId: string; apiKey: string; taskID: string };
-  console.log({ workspaceId, apiKey, taskID });
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
   const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
   if (!checkUserApiKeyResult) {
     res.status(401).json({ error: "Unauthorized" });
@@ -134,7 +134,7 @@ app.post("/get_task_images", async (req: Request, res: Response): Promise<void> 
   const { data, error } = await supabase
     .from('pm_tasks')
     .select('images')
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
   if (error) {
@@ -148,8 +148,8 @@ app.post("/get_task_images", async (req: Request, res: Response): Promise<void> 
  * Return work on task
  */
 app.post("/work_on_task", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, taskID } = req.body as { workspaceId: string; apiKey: string; taskID: string };
-  console.log({ workspaceId, apiKey, taskID });
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
   const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
   if (!checkUserApiKeyResult) {
     res.status(401).json({ error: "Unauthorized" });
@@ -159,7 +159,7 @@ app.post("/work_on_task", async (req: Request, res: Response): Promise<void> => 
   const { error: updateError } = await supabase
     .from('pm_tasks')
     .update({ board: 'in-progress' })
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId);
   if (updateError) {
     res.status(500).json({ error: updateError.message });
@@ -169,7 +169,7 @@ app.post("/work_on_task", async (req: Request, res: Response): Promise<void> => 
   const { data, error } = await supabase
     .from('pm_tasks')
     .select('*')
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
   if (error) throw new Error(error.message);
@@ -182,8 +182,8 @@ app.post("/work_on_task", async (req: Request, res: Response): Promise<void> => 
  * Return explain_setup 
  */
 app.post("/explain_setup", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, taskID } = req.body as { workspaceId: string; apiKey: string; taskID: string };
-  console.log({ workspaceId, apiKey, taskID });
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
   const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
   if (!checkUserApiKeyResult) {
     res.status(401).json({ error: "Unauthorized" });
@@ -193,7 +193,7 @@ app.post("/explain_setup", async (req: Request, res: Response): Promise<void> =>
   const { data, error } = await supabase
     .from('pm_tasks')
     .select('*')
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
   if (error) throw new Error(error.message);
@@ -205,8 +205,8 @@ app.post("/explain_setup", async (req: Request, res: Response): Promise<void> =>
  * Return move_task
  */
 app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, taskID, board } = req.body as { workspaceId: string; apiKey: string; taskID: string; board: string };
-  console.log({ workspaceId, apiKey, taskID, board });
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
   const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
   if (!checkUserApiKeyResult) {
     res.status(401).json({ error: "Unauthorized" });
@@ -215,8 +215,8 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
   
   const { error: updateError } = await supabase
     .from('pm_tasks')
-    .update({ board })
-    .eq('id', taskID)
+    .update({ board: schema?.board })
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId);
   if (updateError) {
     res.status(500).json({ error: updateError.message });
@@ -226,7 +226,7 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('pm_tasks')
     .select('*')
-    .eq('id', taskID)
+    .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
   if (error) throw new Error(error.message);
