@@ -148,7 +148,13 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     .eq('parent_task_id', data?.id)
     .single();
 
-  data.subtasks = subTasks;
+  if (subTasksError) {
+    console.error({subTasksError});
+    res.status(500).json({ error: subTasksError.message });
+    return;
+  }
+
+  data.subtasks = subTasks ? [subTasks] : [];
   if (error) {
     res.status(500).json({ error: error.message });
     return;
