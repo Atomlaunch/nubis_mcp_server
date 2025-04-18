@@ -302,6 +302,7 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
       title: schema?.title,
       description: schema?.description,
       board: schema?.board || 'backlog',
+      parent_task_id: schema?.parent_task_id || null,
       project_id: workspaceId,
       sort_order: (maxSortOrder?.sort_order || 0) + 1000,
       task_number: (maxTaskNumber?.task_number || 0) + 1,
