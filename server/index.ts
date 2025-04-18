@@ -45,6 +45,7 @@ app.use((req, res, next) => {
 
 // Helper to validate API key and return a Supabase client for the user
 async function checkUserApiKey(apiKey: string, workspaceId: string) {
+  try {
     if (!workspaceId) throw new Error("workspaceId is required");
     if (!apiKey) throw new Error("apiKey is required");
     // Validate apiKey in api_key table
@@ -66,7 +67,11 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
     if (workspaceError || !workspaceData) throw new Error(`User does not have access to workspace ${workspaceId}`);
     // Return if user has access to workspace
     return true;
+  } catch (error) {
+    console.error(error);
+    return false;
   }
+}
 
 /**
  * Return tasks for a workspace
