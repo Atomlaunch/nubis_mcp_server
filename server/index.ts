@@ -145,8 +145,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     .select('id, task_number, title, description, board, images')
     .order('sort_order', { ascending: true })
     .eq('project_id', workspaceId)
-    .eq('parent_task_id', data?.id)
-    .single();
+    .eq('parent_task_id', data?.id);
 
   if (subTasksError) {
     console.error({subTasksError});
