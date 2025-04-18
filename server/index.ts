@@ -16,6 +16,8 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const app = express();
+
+app.set('trust proxy', true);
 app.use(express.json());
 
 // Rate limit middleware
