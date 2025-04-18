@@ -4,23 +4,25 @@
   "description": "MCP server for Nubis task management",
   "main": "dist/index.js",
   "bin": {
-    "nubis-mcp-server": "./build/index.js"
+    "nubis-mcp-server": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js",
-    "start": "node build/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+    "postinstall": "cd server && npm install",
+    "build": "cd server && npm run build",
+    "start": "cd server && npm start",
+    "dev": "cd server && npm run dev",
+    "mcp:build": "tsc",
+    "mcp:start": "node dist/index.js",
+    "mcp:dev": "ts-node-dev --respawn --transpile-only src/index.ts"
   },
   "author": "lil2good",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
     "dotenv": "^16.0.0",
-    "express": "^4.18.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
