@@ -75,6 +75,25 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
   }
 }
 
+async function getUserProfile(apiKey: string) {
+  try {
+    if (!apiKey) throw new Error("apiKey is required");
+    const { data, error } = await supabase
+      .from('api_keys')
+      .select('*')
+      .eq('api_key', apiKey)
+      .single();
+    if (error || !data) throw new Error("Invalid or unauthorized apiKey");
+
+    // Get userID
+    const { user_id } = data;
+    return user_id;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+}
+
 /**
  * Return tasks for a workspace
  */
@@ -237,6 +256,63 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     .eq('project_id', workspaceId)
     .single();
   if (error) throw new Error(error.message);
+  
+  res.json({ data });
+});
+
+/**
+ *  Return Create Task
+ */
+app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
+  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
+  if (!checkUserApiKeyResult) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const userId = await getUserProfile(apiKey);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  // Get max task number for the project
+  const { data: maxTaskNumber } = await supabase
+    .from('pm_tasks')
+    .select('task_number')
+    .eq('project_id', workspaceId)
+    .order('task_number', { ascending: false })
+    .limit(1)
+    .single();
+
+  // Get max sort order
+  const { data: maxSortOrder } = await supabase
+    .from('pm_tasks')
+    .select('sort_order')
+    .eq('project_id', workspaceId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .single();
+  
+  const { data, error: insertError } = await supabase
+    .from('pm_tasks')
+    .insert({
+      title: schema?.title,
+      description: schema?.description,
+      board: schema?.board || 'backlog',
+      project_id: workspaceId,
+      sort_order: (maxSortOrder?.sort_order || 0) + 1000,
+      task_number: (maxTaskNumber?.task_number || 0) + 1,
+      created_by: userId,
+    })
+    .select('*')
+    .single();
+  if (insertError) {
+    res.status(500).json({ error: insertError.message });
+    return;
+  }
   
   res.json({ data });
 });
