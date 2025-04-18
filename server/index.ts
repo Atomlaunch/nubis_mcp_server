@@ -131,10 +131,9 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   
   const { data, error } = await supabase
   .from('pm_tasks')
-  .select('id, task_number, title, description, board, images, bolt: branch_id(name)')
+  .select('id, task_number, title, description, board, images, bolt: branch_id(id, name)')
   .order('sort_order', { ascending: true })
   .eq('project_id', workspaceId)
-  .in('branch_id', schema?.bolt_id ? [schema.bolt_id] : [])
   .in('board', schema?.board ? [schema.board] : ['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed'])
   .limit(schema?.limit);
   if (error) {
