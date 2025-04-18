@@ -107,7 +107,7 @@ app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
   }
 
   const { data, error } = await supabase
-    .from('boltz')
+    .from('pm_branches')
     .select('*')
     .eq('project_id', workspaceId);
   if (error) {
