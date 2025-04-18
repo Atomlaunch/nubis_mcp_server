@@ -138,6 +138,17 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     .eq('id', schema?.taskID)
     .eq('project_id', workspaceId)
     .single();
+  
+  // Get SubTasks
+  const { data: subTasks, error: subTasksError } = await supabase
+    .from('pm_tasks')
+    .select('id, task_number, title, description, board, images')
+    .order('sort_order', { ascending: true })
+    .eq('project_id', workspaceId)
+    .eq('parent_task_id', data?.id)
+    .single();
+
+  data.subtasks = subTasks;
   if (error) {
     res.status(500).json({ error: error.message });
     return;
@@ -310,6 +321,63 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     })
     .select('*')
     .single();
+  if (insertError) {
+    res.status(500).json({ error: insertError.message });
+    return;
+  }
+  
+  res.json({ data });
+});
+
+/**
+ *  Return Create Bulk Tasks
+ */
+app.post("/create_bulk_tasks", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as { workspaceId: string; apiKey: string; schema: any };
+  console.log({ workspaceId, apiKey, schema });
+  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
+  if (!checkUserApiKeyResult) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const userId = await getUserProfile(apiKey);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  // Get max task number for the project
+  const { data: maxTaskNumber } = await supabase
+    .from('pm_tasks')
+    .select('task_number')
+    .eq('project_id', workspaceId)
+    .order('task_number', { ascending: false })
+    .limit(1)
+    .single();
+
+  // Get max sort order
+  const { data: maxSortOrder } = await supabase
+    .from('pm_tasks')
+    .select('sort_order')
+    .eq('project_id', workspaceId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .single();
+
+  const { data, error: insertError } = await supabase
+    .from('pm_tasks')
+    .insert(schema?.tasks.map((task: any) => ({
+      title: task.title,
+      description: task.description,
+      board: task.board || 'backlog',
+      parent_task_id: task.parent_task_id || null,
+      project_id: workspaceId,
+      sort_order: (maxSortOrder?.sort_order || 0) + 1000,
+      task_number: (maxTaskNumber?.task_number || 0) + 1,
+      created_by: userId,
+    })))
+    .select('*');
   if (insertError) {
     res.status(500).json({ error: insertError.message });
     return;
