@@ -134,7 +134,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   .select('id, task_number, title, description, board, images, bolt: branch_id(name)')
   .order('sort_order', { ascending: true })
   .eq('project_id', workspaceId)
-  .in('bolt', schema?.bolt ? [schema.bolt] : [])
+  .in('pm_branches', schema?.bolt_id ? [schema.bolt_id] : [])
   .in('board', schema?.board ? [schema.board] : ['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed'])
   .limit(schema?.limit);
   if (error) {
