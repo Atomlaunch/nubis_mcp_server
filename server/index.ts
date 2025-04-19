@@ -131,7 +131,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   
   const { data, error } = await supabase
   .from('pm_tasks')
-  .select('id, task_number, title, description, board, images, bolt: branch_id(*)')
+  .select('id, task_number, title, description, board, images, branch_id(id,name)')
   .order('sort_order', { ascending: true })
   .eq('project_id', workspaceId)
   .in('board', schema?.board ? [schema.board] : ['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed'])
