@@ -150,7 +150,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   let query = supabase
     .from("pm_tasks")
     .select(
-      "id, task_number, title, description, board, images, bolt: branch_id(id, name)"
+      "id, task_number, title, description, board, images, bolt: branch_id(id, name), github_item_type, github_file_path, github_repo_name"
     )
     .order("sort_order", { ascending: true })
     .eq("project_id", workspaceId)
@@ -201,7 +201,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   const { data: subTasks, error: subTasksError } = await supabase
     .from("pm_tasks")
     .select(
-      "id, task_number, title, description, board, images, bolt: branch_id(name)"
+      "id, task_number, title, description, board, images, bolt: branch_id(name), github_item_type, github_file_path, github_repo_name"
     )
     .order("sort_order", { ascending: true })
     .eq("project_id", workspaceId)
@@ -295,10 +295,10 @@ app.post(
 );
 
 /**
- * Return explain_setup
+ * Return explain_task
  */
 app.post(
-  "/explain_setup",
+  "/explain_task",
   async (req: Request, res: Response): Promise<void> => {
     const { workspaceId, apiKey, schema } = req.body as {
       workspaceId: string;
