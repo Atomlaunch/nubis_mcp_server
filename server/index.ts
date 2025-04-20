@@ -28,13 +28,13 @@ app.use(express.json());
 
 // Rate limit middleware
 const apiLimiter = rateLimit({
-  windowMs: 20 * 60 * 1000, // 20 minutes
-  max: 200, // limit each IP to 200 requests per windowMs
+  windowMs: 5 * 60 * 1000, // 10 minutes
+  max: 50, // limit each IP to 50 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   message: {
     error:
-      "Too many requests, please try again later. (200 requests per 20 minutes)",
+      "Too many requests, please try again later. (50 requests per 10 minutes)",
   },
 });
 
