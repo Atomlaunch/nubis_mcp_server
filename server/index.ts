@@ -149,12 +149,12 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
 
   let query = supabase
   .from("pm_tasks")
-  .select(
-    `id, task_number, title, description, board, images, 
-     bolt:branch_id(id, name), 
-     github_item_type, github_file_path, github_repo_name, 
-     pm_task_blockers:pm_task_blockers(id, blocker_task_id, task_id)`
-  )
+  .select(`
+    id, task_number, title, description, board, images, 
+    bolt:branch_id(id, name), 
+    github_item_type, github_file_path, github_repo_name, 
+    pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)
+  `)
   .order("sort_order", { ascending: true })
   .eq("project_id", workspaceId)
   .limit(schema?.limit);
