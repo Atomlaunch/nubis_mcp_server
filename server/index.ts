@@ -195,7 +195,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
 
   const { data, error } = await supabase
     .from("pm_tasks")
-    .select("*")
+    .select("*, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)")
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .single();
