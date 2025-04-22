@@ -427,6 +427,48 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
 });
 
 /**
+ * Update task
+ */
+app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+
+  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
+  if (!checkUserApiKeyResult) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const userId = await getUserProfile(apiKey);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { data, error: updateError } = await supabase
+    .from("pm_tasks")
+    .update({
+      title: schema?.title,
+      description: schema?.description,
+      board: schema?.board || "backlog",
+      branch_id: schema?.bolt_id || null,
+      parent_task_id: schema?.parent_task_id || null,
+    })
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .select("*")
+    .single();
+  if (updateError) {
+    res.status(500).json({ error: updateError.message });
+    return;
+  }
+  res.json({ data });
+});
+
+/**
  *  Return Create Bulk Tasks
  */
 app.post(
