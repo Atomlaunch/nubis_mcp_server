@@ -448,14 +448,26 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  // get task data
+  const { data: task, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("*")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+  if (taskError) {
+    res.status(500).json({ error: taskError.message });
+    return;
+  }
+
   const { data, error: updateError } = await supabase
     .from("pm_tasks")
     .update({
       title: schema?.title,
       description: schema?.description,
-      board: schema?.board || "backlog",
-      branch_id: schema?.bolt_id || null,
-      parent_task_id: schema?.parent_task_id || null,
+      board: schema?.board || task?.board || "backlog",
+      branch_id: schema?.bolt_id || task?.branch_id || null,
+      parent_task_id: schema?.parent_task_id || task?.parent_task_id || null,
     })
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
