@@ -77,6 +77,28 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       .single();
     if (workspaceError || !workspaceData)
       throw new Error(`User does not have access to workspace ${workspaceId}`);
+
+    // Check API Usage
+    const { data: apiUsageData, error: apiUsageError } = await supabase
+      .from("api_usage")
+      .select("*")
+      .eq("project_id", workspaceId)
+      .single();
+    if (apiUsageError || !apiUsageData)
+      throw new Error(`API usage limit not found for workspace ${workspaceId}`);
+
+    if ((apiUsageData.remaining_calls - 1) <= 0) {
+      throw new Error("API usage limit exceeded");
+    }
+
+    // Update API Usage - 1
+    const { error: updateError } = await supabase
+      .from("api_usage")
+      .update({ remaining_calls: apiUsageData.remaining_calls - 1 })
+      .eq("project_id", workspaceId)
+    if (updateError) throw new Error("Failed to update API usage");
+    console.log(`API usage updated for workspace ${workspaceId}, Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`)
+    
     // Return if user has access to workspace
     return true;
   } catch (error) {
