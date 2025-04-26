@@ -190,10 +190,10 @@ async function getUserProfile(apiKey: string) {
 
     // Get userID
     const { user_id } = data;
-    return user_id;
+    return { data: user_id, error: null };
   } catch (error) {
     console.error(error);
-    return null;
+    return { data: null, error: null };
   }
 }
 
