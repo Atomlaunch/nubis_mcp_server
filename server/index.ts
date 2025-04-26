@@ -65,18 +65,54 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       .select("*")
       .eq("api_key", apiKey)
       .single();
-    if (error || !data) throw new Error("Invalid or unauthorized apiKey");
+    if (error || !data) {
+      return {
+        success: false,
+        error: "Invalid or unauthorized apiKey",
+        api_usage: null,
+        user: null,
+      };
+    }
 
     const { user_id } = data;
-    // check if user has access to workspace
+
+    // Check for Permissions
     const { data: workspaceData, error: workspaceError } = await supabase
       .from("pm_members")
-      .select("id")
+      .select("id, role")
       .eq("project_id", workspaceId)
       .eq("user_id", user_id)
       .single();
-    if (workspaceError || !workspaceData)
-      throw new Error(`User does not have access to workspace ${workspaceId}`);
+    if (workspaceError || !workspaceData) {
+      return {
+        success: false,
+        error: `User does not have access to workspace ${workspaceId}`,
+        api_usage: null,
+        user: null,
+      };
+    }
+
+    const role = workspaceData.role;
+    const is_admin = role === "owner" || role === "admin";
+
+    // check if user has access to workspace
+    if (!is_admin) {
+      const { data: permissionsData, error: permissionsError } = await supabase
+        .from("pm_role_permissions")
+        .select("*")
+        .eq("project_id", workspaceId)
+        .eq("role", workspaceData.role)
+        .eq("resource", "api_calls")
+        .single();
+      if (permissionsError || !permissionsData) {
+        return {
+          success: false,
+          error: "User does not have access to resource api_calls",
+          api_usage: null,
+          user: { role, is_admin, user_id },
+        };
+      }
+    }
 
     // Check API Usage
     const { data: apiUsageData, error: apiUsageError } = await supabase
@@ -84,26 +120,65 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       .select("*")
       .eq("project_id", workspaceId)
       .single();
-    if (apiUsageError || !apiUsageData)
-      throw new Error(`API usage limit not found for workspace ${workspaceId}`);
+    if (apiUsageError || !apiUsageData) {
+      return {
+        success: false,
+        error: `API usage limit not found for workspace ${workspaceId}`,
+        api_usage: null,
+        user: { role, is_admin, user_id },
+      };
+    }
 
-    if ((apiUsageData.remaining_calls - 1) <= 0) {
-      throw new Error("API usage limit exceeded");
+    if (apiUsageData.remaining_calls <= 0) {
+      return {
+        success: false,
+        error: "API usage limit exceeded",
+        api_usage: {
+          remaining_calls: apiUsageData.remaining_calls,
+          total_limit: apiUsageData.total_limit
+        },
+        user: { role, is_admin, user_id },
+      };
     }
 
     // Update API Usage - 1
     const { error: updateError } = await supabase
       .from("api_usage")
       .update({ remaining_calls: apiUsageData.remaining_calls - 1 })
-      .eq("project_id", workspaceId)
-    if (updateError) throw new Error("Failed to update API usage");
-    console.log(`API usage updated for workspace ${workspaceId}, Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`)
-    
+      .eq("project_id", workspaceId);
+
+    if (updateError) {
+      return {
+        success: false,
+        error: "Failed to update API usage",
+        api_usage: {
+          remaining_calls: apiUsageData.remaining_calls,
+          total_limit: apiUsageData.total_limit
+        }
+      };
+    }
+    console.log(
+      `API usage updated for workspace ${workspaceId}, Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`
+    );
+
     // Return if user has access to workspace
-    return true;
+    return {
+      success: true,
+      error: null,
+      api_usage: {
+        remaining_calls: apiUsageData.remaining_calls - 1,
+        total_limit: apiUsageData.total_limit
+      },
+      user: { role, is_admin, user_id },
+    };
   } catch (error) {
     console.error(error);
-    return false;
+    return {
+      success: false,
+      error: "Failed to check user API key",
+      api_usage: null,
+      user: null,
+    };
   }
 }
 
@@ -136,21 +211,21 @@ app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
   console.log({ workspaceId, apiKey, schema });
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  const { data, error } = await supabase
+  const { data, error: boltzError } = await supabase
     .from("pm_branches")
     .select("*")
     .eq("project_id", workspaceId);
-  if (error) {
-    res.status(500).json({ error: error.message });
+  if (boltzError) {
+    res.status(500).json({ error: boltzError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -163,23 +238,19 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
   console.log({ workspaceId, apiKey, schema });
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
   let query = supabase
-  .from("pm_tasks")
-  .select(`
-    id, task_number, title, description, board, images, 
-    bolt:branch_id(id, name), 
-    github_item_type, github_file_path, github_repo_name, 
-    pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)
-  `)
-  .order("sort_order", { ascending: false })
-  .eq("project_id", workspaceId)
-  .limit(schema?.limit);
+    .from("pm_tasks")
+    .select(
+      `*, branch_id, board, parent_task_id, sort_order, task_number, created_by, github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)`
+    )
+    .order("sort_order", { ascending: false })
+    .eq("project_id", workspaceId);
 
   if (schema?.bolt_id) {
     query = query.eq("branch_id", schema.bolt_id);
@@ -189,14 +260,17 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
     query = query.in("board", [schema.board]);
   }
 
-  const { data, error } = await query;
+  if (schema?.limit) {
+    query = query.limit(schema.limit);
+  }
 
-  if (error) {
-    res.status(500).json({ error: error.message });
+  const { data, error: tasksError } = await query;
+
+  if (tasksError) {
+    res.status(500).json({ error: tasksError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
-  
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -209,15 +283,15 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
   console.log({ workspaceId, apiKey, schema });
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  const { data, error } = await supabase
+  const { data, error: taskError } = await supabase
     .from("pm_tasks")
-    .select("*, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)")
+    .select("*")
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .single();
@@ -226,7 +300,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   const { data: subTasks, error: subTasksError } = await supabase
     .from("pm_tasks")
     .select(
-      "id, task_number, title, description, board, images, bolt: branch_id(name), github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)"
+      "id, task_number, title, description, board, images, branch_id, github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)"
     )
     .order("sort_order", { ascending: false })
     .eq("project_id", workspaceId)
@@ -234,16 +308,16 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
 
   if (subTasksError) {
     console.error({ subTasksError });
-    res.status(500).json({ error: subTasksError.message });
+    res.status(500).json({ error: subTasksError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
   data.subtasks = subTasks ? [subTasks] : [];
-  if (error) {
-    res.status(500).json({ error: error.message });
+  if (taskError) {
+    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -258,23 +332,23 @@ app.post(
       schema: any;
     };
     console.log({ workspaceId, apiKey, schema });
-    const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-    if (!checkUserApiKeyResult) {
-      res.status(401).json({ error: "Unauthorized" });
+    const auth = await checkUserApiKey(apiKey, workspaceId);
+    if (!auth.success) {
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error: taskError } = await supabase
       .from("pm_tasks")
       .select("images")
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId)
       .single();
-    if (error) {
-      res.status(500).json({ error: error.message });
+    if (taskError) {
+      res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
       return;
     }
-    res.json({ data });
+    res.json({ data, api_usage: auth.api_usage, user: auth.user });
   }
 );
 
@@ -290,9 +364,9 @@ app.post(
       schema: any;
     };
     console.log({ workspaceId, apiKey, schema });
-    const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-    if (!checkUserApiKeyResult) {
-      res.status(401).json({ error: "Unauthorized" });
+    const auth = await checkUserApiKey(apiKey, workspaceId);
+    if (!auth.success) {
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
@@ -302,20 +376,20 @@ app.post(
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId);
     if (updateError) {
-      res.status(500).json({ error: updateError.message });
+      res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error: taskError } = await supabase
       .from("pm_tasks")
       .select("*")
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId)
       .single();
-    if (error) throw new Error(error.message);
+    if (taskError) throw new Error(taskError.message);
 
     // Return updated task
-    res.json({ data });
+    res.json({ data, api_usage: auth.api_usage, user: auth.user });
   }
 );
 
@@ -331,21 +405,21 @@ app.post(
       schema: any;
     };
     console.log({ workspaceId, apiKey, schema });
-    const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-    if (!checkUserApiKeyResult) {
-      res.status(401).json({ error: "Unauthorized" });
+    const auth = await checkUserApiKey(apiKey, workspaceId);
+    if (!auth.success) {
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error: taskError } = await supabase
       .from("pm_tasks")
       .select("*")
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId)
       .single();
-    if (error) throw new Error(error.message);
+    if (taskError) throw new Error(taskError.message);
 
-    res.json({ data });
+    res.json({ data, api_usage: auth.api_usage, user: auth.user });
   }
 );
 
@@ -359,9 +433,9 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
   console.log({ workspaceId, apiKey, schema });
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
@@ -371,19 +445,19 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId);
   if (updateError) {
-    res.status(500).json({ error: updateError.message });
+    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  const { data, error } = await supabase
+  const { data, error: taskError } = await supabase
     .from("pm_tasks")
     .select("*")
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .single();
-  if (error) throw new Error(error.message);
+  if (taskError) throw new Error(taskError.message);
 
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -396,15 +470,15 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
   console.log({ workspaceId, apiKey, schema });
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  const userId = await getUserProfile(apiKey);
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
+  const { data: userId, error: userError } = await getUserProfile(apiKey);
+  if (!userId || userError) {
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
@@ -441,11 +515,11 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     .select("*")
     .single();
   if (insertError) {
-    res.status(500).json({ error: insertError.message });
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -458,15 +532,15 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     schema: any;
   };
 
-  const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-  if (!checkUserApiKeyResult) {
-    res.status(401).json({ error: "Unauthorized" });
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
-  const userId = await getUserProfile(apiKey);
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
+  const { data: userId, error: userError } = await getUserProfile(apiKey);
+  if (!userId || userError) {
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
@@ -478,7 +552,7 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .eq("project_id", workspaceId)
     .single();
   if (taskError) {
-    res.status(500).json({ error: taskError.message });
+    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
 
@@ -496,10 +570,10 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .select("*")
     .single();
   if (updateError) {
-    res.status(500).json({ error: updateError.message });
+    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
     return;
   }
-  res.json({ data });
+  res.json({ data, api_usage: auth.api_usage, user: auth.user });
 });
 
 /**
@@ -514,15 +588,15 @@ app.post(
       schema: any;
     };
     console.log({ workspaceId, apiKey, schema });
-    const checkUserApiKeyResult = await checkUserApiKey(apiKey, workspaceId);
-    if (!checkUserApiKeyResult) {
-      res.status(401).json({ error: "Unauthorized" });
+    const auth = await checkUserApiKey(apiKey, workspaceId);
+    if (!auth.success) {
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
     const userId = await getUserProfile(apiKey);
     if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
+      res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
@@ -560,11 +634,11 @@ app.post(
       )
       .select("*");
     if (insertError) {
-      res.status(500).json({ error: insertError.message });
+      res.status(500).json({ error: insertError.message, api_usage: auth.api_usage, user: auth.user });
       return;
     }
 
-    res.json({ data });
+    res.json({ data, api_usage: auth.api_usage, user: auth.user });
   }
 );
 
