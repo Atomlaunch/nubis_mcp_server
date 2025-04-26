@@ -69,8 +69,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: "Invalid or unauthorized apiKey",
-        api_usage: null,
-        user: null,
+        api_usage: null
       };
     }
 
@@ -87,8 +86,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: `User does not have access to workspace ${workspaceId}`,
-        api_usage: null,
-        user: null,
+        api_usage: null
       };
     }
 
@@ -108,8 +106,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
         return {
           success: false,
           error: "User does not have access to resource api_calls",
-          api_usage: null,
-          user: { role, is_admin, user_id },
+          api_usage: null
         };
       }
     }
@@ -124,8 +121,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: `API usage limit not found for workspace ${workspaceId}`,
-        api_usage: null,
-        user: { role, is_admin, user_id },
+        api_usage: null
       };
     }
 
@@ -134,10 +130,10 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
         success: false,
         error: "API usage limit exceeded",
         api_usage: {
+          count: "descending",
           remaining_calls: apiUsageData.remaining_calls,
           total_limit: apiUsageData.total_limit
-        },
-        user: { role, is_admin, user_id },
+        }
       };
     }
 
@@ -152,6 +148,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
         success: false,
         error: "Failed to update API usage",
         api_usage: {
+          count: "descending",
           remaining_calls: apiUsageData.remaining_calls,
           total_limit: apiUsageData.total_limit
         }
@@ -166,18 +163,17 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
       success: true,
       error: null,
       api_usage: {
+        count: "descending",
         remaining_calls: apiUsageData.remaining_calls - 1,
         total_limit: apiUsageData.total_limit
-      },
-      user: { role, is_admin, user_id },
+      }
     };
   } catch (error) {
     console.error(error);
     return {
       success: false,
       error: "Failed to check user API key",
-      api_usage: null,
-      user: null,
+      api_usage: null
     };
   }
 }
@@ -213,7 +209,7 @@ app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
   console.log({ workspaceId, apiKey, schema });
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
@@ -222,10 +218,10 @@ app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
     .select("*")
     .eq("project_id", workspaceId);
   if (boltzError) {
-    res.status(500).json({ error: boltzError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: boltzError.message, api_usage: auth.api_usage });
     return;
   }
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -240,7 +236,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   console.log({ workspaceId, apiKey, schema });
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
@@ -267,10 +263,10 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
   const { data, error: tasksError } = await query;
 
   if (tasksError) {
-    res.status(500).json({ error: tasksError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: tasksError.message, api_usage: auth.api_usage });
     return;
   }
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -285,7 +281,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   console.log({ workspaceId, apiKey, schema });
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
@@ -308,16 +304,16 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
 
   if (subTasksError) {
     console.error({ subTasksError });
-    res.status(500).json({ error: subTasksError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: subTasksError.message, api_usage: auth.api_usage });
     return;
   }
 
   data.subtasks = subTasks ? [subTasks] : [];
   if (taskError) {
-    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage });
     return;
   }
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -334,7 +330,7 @@ app.post(
     console.log({ workspaceId, apiKey, schema });
     const auth = await checkUserApiKey(apiKey, workspaceId);
     if (!auth.success) {
-      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
       return;
     }
 
@@ -345,10 +341,10 @@ app.post(
       .eq("project_id", workspaceId)
       .single();
     if (taskError) {
-      res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
+      res.status(500).json({ error: taskError.message, api_usage: auth.api_usage });
       return;
     }
-    res.json({ data, api_usage: auth.api_usage, user: auth.user });
+    res.json({ data, api_usage: auth.api_usage });
   }
 );
 
@@ -366,7 +362,7 @@ app.post(
     console.log({ workspaceId, apiKey, schema });
     const auth = await checkUserApiKey(apiKey, workspaceId);
     if (!auth.success) {
-      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
       return;
     }
 
@@ -376,7 +372,7 @@ app.post(
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId);
     if (updateError) {
-      res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
+      res.status(500).json({ error: updateError.message, api_usage: auth.api_usage });
       return;
     }
 
@@ -389,7 +385,7 @@ app.post(
     if (taskError) throw new Error(taskError.message);
 
     // Return updated task
-    res.json({ data, api_usage: auth.api_usage, user: auth.user });
+    res.json({ data, api_usage: auth.api_usage });
   }
 );
 
@@ -407,7 +403,7 @@ app.post(
     console.log({ workspaceId, apiKey, schema });
     const auth = await checkUserApiKey(apiKey, workspaceId);
     if (!auth.success) {
-      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
       return;
     }
 
@@ -419,7 +415,7 @@ app.post(
       .single();
     if (taskError) throw new Error(taskError.message);
 
-    res.json({ data, api_usage: auth.api_usage, user: auth.user });
+    res.json({ data, api_usage: auth.api_usage });
   }
 );
 
@@ -435,7 +431,7 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
   console.log({ workspaceId, apiKey, schema });
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
@@ -445,7 +441,7 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId);
   if (updateError) {
-    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage });
     return;
   }
 
@@ -457,7 +453,7 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     .single();
   if (taskError) throw new Error(taskError.message);
 
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -472,13 +468,13 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
   console.log({ workspaceId, apiKey, schema });
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
   const { data: userId, error: userError } = await getUserProfile(apiKey);
   if (!userId || userError) {
-    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
     return;
   }
 
@@ -515,11 +511,11 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     .select("*")
     .single();
   if (insertError) {
-    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
     return;
   }
 
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -534,13 +530,13 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
 
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
-    res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
   const { data: userId, error: userError } = await getUserProfile(apiKey);
   if (!userId || userError) {
-    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
     return;
   }
 
@@ -552,7 +548,7 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .eq("project_id", workspaceId)
     .single();
   if (taskError) {
-    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage });
     return;
   }
 
@@ -570,10 +566,10 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .select("*")
     .single();
   if (updateError) {
-    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage, user: auth.user });
+    res.status(500).json({ error: updateError.message, api_usage: auth.api_usage });
     return;
   }
-  res.json({ data, api_usage: auth.api_usage, user: auth.user });
+  res.json({ data, api_usage: auth.api_usage });
 });
 
 /**
@@ -590,13 +586,13 @@ app.post(
     console.log({ workspaceId, apiKey, schema });
     const auth = await checkUserApiKey(apiKey, workspaceId);
     if (!auth.success) {
-      res.status(401).json({ error: auth.error, api_usage: auth.api_usage, user: auth.user });
+      res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
       return;
     }
 
     const userId = await getUserProfile(apiKey);
     if (!userId) {
-      res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage, user: auth.user });
+      res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
       return;
     }
 
@@ -634,11 +630,11 @@ app.post(
       )
       .select("*");
     if (insertError) {
-      res.status(500).json({ error: insertError.message, api_usage: auth.api_usage, user: auth.user });
+      res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
       return;
     }
 
-    res.json({ data, api_usage: auth.api_usage, user: auth.user });
+    res.json({ data, api_usage: auth.api_usage });
   }
 );
 
