@@ -473,6 +473,7 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
   }
 
   const { data: userId, error: userError } = await getUserProfile(apiKey);
+  console.log({ userId, userError });
   if (!userId || userError) {
     res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
     return;
