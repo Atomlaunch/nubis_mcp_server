@@ -42,42 +42,77 @@ async function getResultsFromMiddleware({ endpoint, schema }) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to fetch tasks from middleware');
     }
-    const { data } = await response.json();
-    if (!data)
+    // Return the full JSON response (including api_usage, user, etc.)
+    const json = await response.json();
+    if (!json.data)
         throw new Error('No data returned from middleware');
-    return data;
+    return json;
 }
+// Get Boltz -> to save IDs for use in tasks later
+server.tool("get_boltz", "Fetch all boltz for a workspace", async () => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'get_boltz',
+        schema: {}
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
 // Get Tasks -> Get tasks for a workspace
-server.tool("get_tasks", "Get tasks for a workspace", {
+server.tool("get_tasks", "Get tasks for a workspace, including subtasks, boltz, and github details/file paths", {
     limit: zod_1.z.number().optional().default(5),
     board: zod_1.z.enum(['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed']).optional(),
-}, async ({ limit, board }) => {
+    bolt_id: zod_1.z.string().optional(),
+}, async ({ limit, board, bolt_id }) => {
     try {
-        const data = await getResultsFromMiddleware({
+        const json = await getResultsFromMiddleware({
             endpoint: 'get_tasks',
             schema: {
                 board,
+                bolt_id,
                 limit
             }
         });
-        if (!data)
+        if (!json.data)
             throw new Error('No data returned from middleware');
+        const taskContent = json.data.map((task) => ({
+            type: "text",
+            text: [
+                `---`,
+                `### ${task.title}`,
+                `**Task ID:** ${task.id}`,
+                `**Task Number:** ${task.task_number}`,
+                `**Board:** ${task.board}`,
+                `**Bolt:** ${task.bolt && typeof task.bolt === "object" && !Array.isArray(task.bolt) && "name" in task.bolt && task.bolt.name ? task.bolt.name : "_No bolt_"}`,
+                `**Description:** ${task.description ? task.description : "_No description_"}`,
+                `**Path Type:** ${task.github_item_type ? task.github_item_type : "_No file path type_"}`,
+                `**File Path:** ${task.github_file_path ? task.github_file_path : "_No file path_"}`,
+                `**Repo Name:** ${task.github_repo_name ? task.github_repo_name : "_No repo name_"}`,
+                `**Blockers:** ${task.pm_task_blockers && task.pm_task_blockers.length > 0 ? task.pm_task_blockers.map(blocker => blocker.blocker_task_id).join(', ') : "_No blockers_"}`,
+                task.images && task.images.length > 0
+                    ? task.images.map((image) => image.url).join('\n')
+                    : "_No images_",
+                `---`,
+            ].join('\n\n'),
+        }));
+        // Append quota and user info as additional content
+        taskContent.push({
+            type: "text",
+            text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+        });
         return {
-            content: data.map((task) => ({
-                type: "text",
-                text: [
-                    `==============`,
-                    `### ${task.title}`,
-                    `**Task ID:** ${task.id}`,
-                    `**Task Number:** ${task.task_number}`,
-                    `**Board:** ${task.board}`,
-                    `**Description:** ${task.description ? task.description : "_No description_"}`,
-                    task.images && task.images.length > 0
-                        ? task.images.map((image) => image.url).join('\n')
-                        : "_No images_",
-                    `==============`,
-                ].join('\n\n'),
-            })),
+            content: taskContent,
         };
     }
     catch (error) {
@@ -89,20 +124,24 @@ server.tool("get_tasks", "Get tasks for a workspace", {
 server.tool("get_task", "Get a task by ID", {
     taskID: zod_1.z.string(),
 }, async ({ taskID }) => {
-    const data = await getResultsFromMiddleware({
+    const json = await getResultsFromMiddleware({
         endpoint: 'get_task',
         schema: {
             taskID
         }
     });
-    if (!data)
+    if (!json.data)
         throw new Error('No data returned from middleware');
     return {
         content: [
             {
                 type: "text",
-                text: JSON.stringify(data),
+                text: JSON.stringify(json.data),
             },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
         ],
     };
 });
@@ -110,20 +149,24 @@ server.tool("get_task", "Get a task by ID", {
 server.tool("get_task_images", "Get/View images for a task", {
     taskID: zod_1.z.string(),
 }, async ({ taskID }) => {
-    const data = await getResultsFromMiddleware({
+    const json = await getResultsFromMiddleware({
         endpoint: 'get_task_images',
         schema: {
             taskID
         }
     });
-    if (!data)
+    if (!json.data)
         throw new Error('No data returned from middleware');
     return {
         content: [
             {
                 type: "text",
-                text: JSON.stringify(data),
+                text: JSON.stringify(json.data),
             },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
         ],
     };
 });
@@ -131,21 +174,45 @@ server.tool("get_task_images", "Get/View images for a task", {
 server.tool("work_on_task", "Work on a task", {
     taskID: zod_1.z.string(),
 }, async ({ taskID }) => {
-    const data = await getResultsFromMiddleware({
+    // Step 1: Fetch task details
+    const taskData = await getResultsFromMiddleware({
+        endpoint: 'get_task',
+        schema: { taskID }
+    });
+    if (!taskData.data)
+        throw new Error('No data returned from middleware');
+    // Step 2: Check for blockers
+    if (Array.isArray(taskData.data.pm_task_blockers) && taskData.data.pm_task_blockers.length > 0) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Task ${taskID} cannot be worked on because it has blockers: ${taskData.data.pm_task_blockers.map((b) => b.blocker_task_id).join(', ')}. Please resolve all blockers before proceeding.`,
+                },
+                {
+                    type: "text",
+                    text: `Always provide API Usage information separately. Usage: ${JSON.stringify(taskData.api_usage)}`,
+                }
+            ],
+        };
+    }
+    ;
+    const json = await getResultsFromMiddleware({
         endpoint: 'work_on_task',
         schema: {
             taskID
         }
     });
-    if (!data)
-        throw new Error('No data returned from middleware');
     return {
         content: [
             {
                 type: "text",
-                text: `You are assisting with task management in Nubis. Your task is to implement the user's requested action based on the following details:
-      \n      **Task Instruction**: Process and update the task with the provided information.\n      **Task ID**: ${taskID}\n      **Task Details**: \n      ${JSON.stringify(data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`
+                text: `You are assisting with task management in Nubis. Your task is to implement the user's requested action based on the following details:\n\n**Task Instruction**: Process and update the task with the provided information.\n\n**Task ID**: ${taskID}\n\n**Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`,
             },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
         ],
     };
 });
@@ -153,36 +220,40 @@ server.tool("work_on_task", "Work on a task", {
 server.tool("explain_setup", "Explain setup and what needs to be done for feature to be implemented", {
     taskID: zod_1.z.string(),
 }, async ({ taskID }) => {
-    const data = await getResultsFromMiddleware({
+    const json = await getResultsFromMiddleware({
         endpoint: 'explain_setup',
         schema: {
             taskID
         }
     });
-    if (!data)
+    if (!json.data)
         throw new Error('No data returned from middleware');
     return {
         content: [
             {
                 type: "text",
-                text: `You are assisting with task management in Nubis. Your task is to explain the setup and what needs to be done for feature to be implemented.\n      \n      **Task Instruction**: Explain the setup and what needs to be done for feature to be implemented.\n      **Task Details**: \n      ${JSON.stringify(data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the feature and return a response indicating the action that needs to be taken.`
+                text: `You are assisting with task management in Nubis. Your task is to explain the setup and what needs to be done for feature to be implemented.\n      \n      **Task Instruction**: Explain the setup and what needs to be done for feature to be implemented.\n      **Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the feature and return a response indicating the action that needs to be taken.`,
             },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
         ],
     };
 });
-// Move Task -> Move a task to ['backlog', 'in-progress','reviewing', 'completed']
-server.tool("move_task", "Move a task to ['backlog', 'in-progress','reviewing', 'completed']", {
+// Move Task -> Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']
+server.tool("move_task", "Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']", {
     taskID: zod_1.z.string(),
-    board: zod_1.z.enum(['backlog', 'in-progress', 'reviewing', 'completed']),
+    board: zod_1.z.enum(['backlog', 'priority', 'in-progress', 'reviewing', 'completed']),
 }, async ({ taskID, board }) => {
-    const data = await getResultsFromMiddleware({
+    const json = await getResultsFromMiddleware({
         endpoint: 'move_task',
         schema: {
             taskID,
             board
         }
     });
-    if (!data)
+    if (!json.data)
         throw new Error('No data returned from middleware');
     return {
         content: [
@@ -190,6 +261,76 @@ server.tool("move_task", "Move a task to ['backlog', 'in-progress','reviewing', 
                 type: "text",
                 text: `Task ${taskID} has been moved to ${board}`,
             },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
+// Create Task -> Create a new task
+server.tool("create_task", "Create a new task or subtask (parent_task_id is required for subtasks)", {
+    title: zod_1.z.string(),
+    description: zod_1.z.string().optional(),
+    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog'),
+    parent_task_id: zod_1.z.string().optional(),
+}, async ({ title, description, board, parent_task_id }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'create_task',
+        schema: {
+            title,
+            description,
+            board,
+            parent_task_id
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
+// Update Task -> Update an existing task
+server.tool("update_task", "Update an existing task (title, description, bolt_id, parent_task_id)", {
+    taskID: zod_1.z.string(),
+    title: zod_1.z.string().optional(),
+    description: zod_1.z.string().optional(),
+    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']),
+    bolt_id: zod_1.z.string().optional(),
+    parent_task_id: zod_1.z.string().optional(),
+}, async ({ taskID, title, description, board, bolt_id, parent_task_id }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'update_task',
+        schema: {
+            taskID,
+            title,
+            description,
+            board,
+            bolt_id,
+            parent_task_id
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
         ],
     };
 });
