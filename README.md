@@ -73,12 +73,12 @@ To use this MCP server with AI assistants that support MCP, add the following co
   "command": "npx",
   "args": [
     "-y",
-    "@lil2good/nubis-mcp-server@latest",
-    "--workspaceID",
-    "your-workspace-id",
-    "--apiKey",
-    "your-api-key"
-  ]
+    "@lil2good/nubis-mcp-server@latest"
+  ],
+  "env": {
+    "NUBIS_API_KEY": "<YOUR_API_KEY>",
+    "NUBIS_WORKSPACE_ID": "<YOUR_WORKSPACE_ID>"
+  }
 }
 ```
 

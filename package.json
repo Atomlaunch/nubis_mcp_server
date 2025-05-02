@@ -1,6 +1,6 @@
 {
   "name": "@lil2good/nubis-mcp-server",
-  "version": "1.0.41",
+  "version": "1.0.44",
   "description": "MCP server for Nubis task management",
   "main": "build/index.js",
   "bin": {

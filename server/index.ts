@@ -3,6 +3,11 @@ import dotenv from "dotenv";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import rateLimit from "express-rate-limit";
 
+
+
+// Register all new endpoints from server/endpoints here for maintainability
+import { registerAddContextToTaskEndpoint } from "./endpoints/add-context-to-task.js";
+
 dotenv.config();
 
 const SUPABASE_URL: string = process.env.SUPABASE_URL || "";
@@ -16,7 +21,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   );
 }
 
-const supabase: SupabaseClient = createClient(
+export const supabase: SupabaseClient = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY
 );
@@ -55,7 +60,7 @@ app.use((req, res, next) => {
 });
 
 // Helper to validate API key and return a Supabase client for the user
-async function checkUserApiKey(apiKey: string, workspaceId: string) {
+export async function checkUserApiKey(apiKey: string, workspaceId: string) {
   try {
     if (!workspaceId) throw new Error("workspaceId is required");
     if (!apiKey) throw new Error("apiKey is required");
@@ -178,7 +183,7 @@ async function checkUserApiKey(apiKey: string, workspaceId: string) {
   }
 }
 
-async function getUserProfile(apiKey: string) {
+export async function getUserProfile(apiKey: string) {
   try {
     if (!apiKey) throw new Error("apiKey is required");
     const { data, error } = await supabase
@@ -245,7 +250,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
     .select(
       `*, branch_id, board, parent_task_id, sort_order, task_number, created_by, github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)`
     )
-    .order("sort_order", { ascending: false })
+    .order("created_at", { ascending: false })
     .eq("project_id", workspaceId);
 
   if (schema?.bolt_id) {
@@ -308,7 +313,21 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  // Get Task Comments
+  const { data: comments, error: commentsError } = await supabase
+    .from("pm_comments")
+    .select("*")
+    .eq("task_id", schema?.taskID)
+    .eq("project_id", workspaceId);
+
+  if (commentsError) {
+    console.error({ commentsError });
+    res.status(500).json({ error: commentsError.message, api_usage: auth.api_usage });
+    return;
+  }
+
   data.subtasks = subTasks ? [subTasks] : [];
+  data.comments = comments ? [comments] : [];
   if (taskError) {
     res.status(500).json({ error: taskError.message, api_usage: auth.api_usage });
     return;
@@ -366,7 +385,7 @@ app.post(
       return;
     }
 
-    const { error: updateError } = await supabase
+    /* const { error: updateError } = await supabase
       .from("pm_tasks")
       .update({ board: "in-progress" })
       .eq("id", schema?.taskID)
@@ -374,7 +393,7 @@ app.post(
     if (updateError) {
       res.status(500).json({ error: updateError.message, api_usage: auth.api_usage });
       return;
-    }
+    } */
 
     const { data, error: taskError } = await supabase
       .from("pm_tasks")
@@ -507,6 +526,10 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
       project_id: workspaceId,
       sort_order: (maxSortOrder?.sort_order || 0) + 1000,
       task_number: (maxTaskNumber?.task_number || 0) + 1,
+      branch_id: schema?.bolt_id || null,
+      github_item_type: schema?.github_item_type || null,
+      github_file_path: schema?.github_file_path || null,
+      github_repo_name: schema?.github_repo_name || null,
       created_by: userId,
     })
     .select("*")
@@ -561,6 +584,9 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
       board: schema?.board || task?.board || "backlog",
       branch_id: schema?.bolt_id || task?.branch_id || null,
       parent_task_id: schema?.parent_task_id || task?.parent_task_id || null,
+      github_item_type: schema?.github_item_type || task?.github_item_type || null,
+      github_file_path: schema?.github_file_path || task?.github_file_path || null,
+      github_repo_name: schema?.github_repo_name || task?.github_repo_name || null,
     })
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
@@ -638,6 +664,8 @@ app.post(
     res.json({ data, api_usage: auth.api_usage });
   }
 );
+
+registerAddContextToTaskEndpoint(app);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

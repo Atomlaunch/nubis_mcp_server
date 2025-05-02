@@ -10,12 +10,8 @@ const zod_1 = require("zod");
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 // Register nubis tools
-const cliWorkspaceID = process.argv.includes('--workspaceID')
-    ? process.argv[process.argv.indexOf('--workspaceID') + 1]
-    : undefined;
-const cliApiKey = process.argv.includes('--apiKey')
-    ? process.argv[process.argv.indexOf('--apiKey') + 1]
-    : undefined;
+const cliWorkspaceID = process.env.NUBIS_WORKSPACE_ID;
+const cliApiKey = process.env.NUBIS_API_KEY;
 // Create server instance
 const server = new mcp_js_1.McpServer({
     name: "nubis-mcp-server",
@@ -25,9 +21,10 @@ const server = new mcp_js_1.McpServer({
         tools: {},
     },
 });
+const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
 // Helper to get results from middleware
 async function getResultsFromMiddleware({ endpoint, schema }) {
-    const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
+    const response = await fetch(backendUrl + '/' + endpoint, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -120,8 +117,10 @@ server.tool("get_tasks", "Get tasks for a workspace, including subtasks, boltz, 
         throw new Error(errorMessage);
     }
 });
-// Get Task -> Get a task by ID
-server.tool("get_task", "Get a task by ID", {
+/**
+ * Get Task Details -> Get a task by ID
+ */
+server.tool("get_task_details", "Get a task by ID", {
     taskID: zod_1.z.string(),
 }, async ({ taskID }) => {
     const json = await getResultsFromMiddleware({
@@ -141,6 +140,36 @@ server.tool("get_task", "Get a task by ID", {
             {
                 type: "text",
                 text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
+//add_context_to_pm_task
+/**
+ * Always ADD CONTEXT TO PM TASK
+ */
+server.tool("add_context_to_task", "Add context to a task", {
+    taskID: zod_1.z.string(),
+    context: zod_1.z.string(),
+}, async ({ taskID, context }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'add_context_to_task',
+        schema: {
+            taskID,
+            context
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify({ taskID, context }),
+            },
+            {
+                type: "text",
+                text: `Always provide API Usage information separately. Usage: ${JSON.stringify({ taskID, context })}`,
             }
         ],
     };
@@ -191,7 +220,7 @@ server.tool("work_on_task", "Work on a task", {
                 },
                 {
                     type: "text",
-                    text: `Always provide API Usage information separately. Usage: ${JSON.stringify(taskData.api_usage)}`,
+                    text: `API Usage: ${JSON.stringify(taskData.api_usage)}`,
                 }
             ],
         };
@@ -207,40 +236,51 @@ server.tool("work_on_task", "Work on a task", {
         content: [
             {
                 type: "text",
-                text: `You are assisting with task management in Nubis. Your task is to implement the user's requested action based on the following details:\n\n**Task Instruction**: Process and update the task with the provided information.\n\n**Task ID**: ${taskID}\n\n**Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`,
+                text: `You are assisting with task management in Nubis. Your task is to work on the user's requested task based on the following details:\n\n**Task Instruction**: Process and update the task with the provided information.\n\n**Task ID**: ${taskID}\n\n**Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`,
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                user: "NUBIS",
+                text: `Prompt user to move this task to 'in-progress' if it is not already in progress.`,
+            },
+            {
+                type: "text",
+                user: "NUBIS",
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
 });
 // Explain setup and what user needs to do for feature to be implemented
-server.tool("explain_setup", "Explain setup and what needs to be done for feature to be implemented", {
-    taskID: zod_1.z.string(),
-}, async ({ taskID }) => {
+/* server.tool(
+  "explain_setup",
+  "Explain setup and what needs to be done for feature to be implemented",
+  {
+    taskID: z.string(),
+  },
+  async ({ taskID }) => {
     const json = await getResultsFromMiddleware({
-        endpoint: 'explain_setup',
-        schema: {
-            taskID
-        }
+      endpoint: 'explain_setup',
+      schema: {
+        taskID
+      }
     });
-    if (!json.data)
-        throw new Error('No data returned from middleware');
+
+    if (!json.data) throw new Error('No data returned from middleware');
     return {
-        content: [
-            {
-                type: "text",
-                text: `You are assisting with task management in Nubis. Your task is to explain the setup and what needs to be done for feature to be implemented.\n      \n      **Task Instruction**: Explain the setup and what needs to be done for feature to be implemented.\n      **Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the feature and return a response indicating the action that needs to be taken.`,
-            },
-            {
-                type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
-            }
-        ],
+      content: [
+        {
+          type: "text",
+          text: `You are assisting with task management in Nubis. Your task is to explain the setup and what needs to be done for feature to be implemented.\n      \n      **Task Instruction**: Explain the setup and what needs to be done for feature to be implemented.\n      **Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the feature and return a response indicating the action that needs to be taken.`,
+        },
+        {
+          type: "text",
+          text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
     };
-});
+  }
+); */
 // Move Task -> Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']
 server.tool("move_task", "Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']", {
     taskID: zod_1.z.string(),
@@ -263,7 +303,7 @@ server.tool("move_task", "Move a task to ['backlog', 'priority', 'in-progress','
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
@@ -274,14 +314,22 @@ server.tool("create_task", "Create a new task or subtask (parent_task_id is requ
     description: zod_1.z.string().optional(),
     board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog'),
     parent_task_id: zod_1.z.string().optional(),
-}, async ({ title, description, board, parent_task_id }) => {
+    github_item_type: zod_1.z.string().optional(), // file or dir
+    github_file_path: zod_1.z.string().optional(), // src/components/modal
+    github_repo_name: zod_1.z.string().optional(), // Atomlaunch/atom_frontend
+    bolt_id: zod_1.z.string().optional()
+}, async ({ title, description, board, parent_task_id, github_item_type, github_file_path, github_repo_name, bolt_id }) => {
     const json = await getResultsFromMiddleware({
         endpoint: 'create_task',
         schema: {
             title,
             description,
             board,
-            parent_task_id
+            parent_task_id,
+            github_item_type,
+            github_file_path,
+            github_repo_name,
+            bolt_id
         }
     });
     if (!json.data)
@@ -294,7 +342,7 @@ server.tool("create_task", "Create a new task or subtask (parent_task_id is requ
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
@@ -304,10 +352,13 @@ server.tool("update_task", "Update an existing task (title, description, bolt_id
     taskID: zod_1.z.string(),
     title: zod_1.z.string().optional(),
     description: zod_1.z.string().optional(),
-    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']),
+    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog'),
     bolt_id: zod_1.z.string().optional(),
     parent_task_id: zod_1.z.string().optional(),
-}, async ({ taskID, title, description, board, bolt_id, parent_task_id }) => {
+    github_item_type: zod_1.z.string().optional(),
+    github_file_path: zod_1.z.string().optional(),
+    github_repo_name: zod_1.z.string().optional(),
+}, async ({ taskID, title, description, board, bolt_id, parent_task_id, github_item_type, github_file_path, github_repo_name }) => {
     const json = await getResultsFromMiddleware({
         endpoint: 'update_task',
         schema: {
@@ -316,7 +367,10 @@ server.tool("update_task", "Update an existing task (title, description, bolt_id
             description,
             board,
             bolt_id,
-            parent_task_id
+            parent_task_id,
+            github_item_type,
+            github_file_path,
+            github_repo_name
         }
     });
     if (!json.data)
@@ -329,7 +383,7 @@ server.tool("update_task", "Update an existing task (title, description, bolt_id
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
