@@ -22,11 +22,9 @@ const server = new McpServer({
   },
 });
 
-const backendUrl = 'https://mcp-server.nubis.app/';
-
 // Helper to get results from middleware
 async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, schema: any}) {
-  const response = await fetch(backendUrl + '/' + endpoint, {
+  const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -179,7 +177,39 @@ server.tool(
         },
         {
           type: "text",
-          text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+/**
+ * Get Task Context -> Get context for a task
+ */
+server.tool(
+  "get_task_context",
+  "Get context for a task",
+  {
+    taskID: z.string(),
+  },
+  async ({ taskID }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'get_task_context',
+      schema: {
+        taskID
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
         }
       ],
     };
@@ -214,7 +244,7 @@ server.tool(
         },
         {
           type: "text",
-          text: `Always provide API Usage information separately. Usage: ${JSON.stringify({ taskID, context })}`,
+          text: `API Usage: ${JSON.stringify({ taskID, context })}`,
         }
       ],
     };
@@ -244,7 +274,7 @@ server.tool(
         },
         {
           type: "text",
-          text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
         }
       ],
     };

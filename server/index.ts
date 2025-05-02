@@ -335,6 +335,35 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   res.json({ data, api_usage: auth.api_usage });
 });
 
+/** 
+ * Get Task Context
+ */
+app.post("/get_task_context", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("context")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+  if (taskError) {
+    res.status(500).json({ error: taskError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
 /**
  * Return task images by ID
  */

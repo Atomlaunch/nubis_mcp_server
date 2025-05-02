@@ -21,10 +21,9 @@ const server = new mcp_js_1.McpServer({
         tools: {},
     },
 });
-const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
 // Helper to get results from middleware
 async function getResultsFromMiddleware({ endpoint, schema }) {
-    const response = await fetch(backendUrl + '/' + endpoint, {
+    const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -352,7 +351,7 @@ server.tool("update_task", "Update an existing task (title, description, bolt_id
     taskID: zod_1.z.string(),
     title: zod_1.z.string().optional(),
     description: zod_1.z.string().optional(),
-    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog'),
+    board: zod_1.z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional(),
     bolt_id: zod_1.z.string().optional(),
     parent_task_id: zod_1.z.string().optional(),
     github_item_type: zod_1.z.string().optional(),
