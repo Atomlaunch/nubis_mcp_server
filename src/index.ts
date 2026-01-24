@@ -4,9 +4,25 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import dotenv from 'dotenv';
-import { json } from "stream/consumers";
 
 dotenv.config();
+
+// Polyfill fetch for older Node.js versions or environments without native fetch
+// This must be done before any fetch calls are made
+let fetchImpl: typeof fetch;
+
+async function ensureFetch(): Promise<typeof fetch> {
+  if (fetchImpl) return fetchImpl;
+
+  if (typeof globalThis.fetch !== 'undefined') {
+    fetchImpl = globalThis.fetch;
+  } else {
+    // Dynamically import node-fetch as fallback
+    const nodeFetch = await import('node-fetch');
+    fetchImpl = nodeFetch.default as unknown as typeof fetch;
+  }
+  return fetchImpl;
+}
 
 // Register nubis tools
 const cliWorkspaceID: string | undefined = process.env.NUBIS_WORKSPACE_ID;
@@ -24,6 +40,7 @@ const server = new McpServer({
 
 // Helper to get results from middleware
 async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, schema: any}) {
+  const fetch = await ensureFetch();
   const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
     method: 'POST',
     headers: {

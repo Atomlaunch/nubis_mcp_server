@@ -9,6 +9,22 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+// Polyfill fetch for older Node.js versions or environments without native fetch
+// This must be done before any fetch calls are made
+let fetchImpl;
+async function ensureFetch() {
+    if (fetchImpl)
+        return fetchImpl;
+    if (typeof globalThis.fetch !== 'undefined') {
+        fetchImpl = globalThis.fetch;
+    }
+    else {
+        // Dynamically import node-fetch as fallback
+        const nodeFetch = await import('node-fetch');
+        fetchImpl = nodeFetch.default;
+    }
+    return fetchImpl;
+}
 // Register nubis tools
 const cliWorkspaceID = process.env.NUBIS_WORKSPACE_ID;
 const cliApiKey = process.env.NUBIS_API_KEY;
@@ -23,6 +39,7 @@ const server = new mcp_js_1.McpServer({
 });
 // Helper to get results from middleware
 async function getResultsFromMiddleware({ endpoint, schema }) {
+    const fetch = await ensureFetch();
     const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
         method: 'POST',
         headers: {
@@ -138,7 +155,34 @@ server.tool("get_task_details", "Get a task by ID", {
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
+/**
+ * Get Task Context -> Get context for a task
+ */
+server.tool("get_task_context", "Get context for a task", {
+    taskID: zod_1.z.string(),
+}, async ({ taskID }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'get_task_context',
+        schema: {
+            taskID
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
@@ -168,7 +212,7 @@ server.tool("add_context_to_task", "Add context to a task", {
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify({ taskID, context })}`,
+                text: `API Usage: ${JSON.stringify({ taskID, context })}`,
             }
         ],
     };
@@ -193,7 +237,7 @@ server.tool("get_task_images", "Get/View images for a task", {
             },
             {
                 type: "text",
-                text: `Always provide API Usage information separately. Usage: ${JSON.stringify(json.api_usage)}`,
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
             }
         ],
     };
