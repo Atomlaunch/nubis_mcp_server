@@ -696,6 +696,339 @@ app.post(
 
 registerAddContextToTaskEndpoint(app);
 
+/**
+ * Add Comment to Task
+ */
+app.post("/add_comment", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data: userId, error: userError } = await getUserProfile(apiKey);
+  if (!userId || userError) {
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: insertError } = await supabase
+    .from("pm_comments")
+    .insert({
+      task_id: schema?.taskID,
+      project_id: workspaceId,
+      content: schema?.content,
+      parent_id: schema?.parent_id || null,
+      user_id: userId,
+    })
+    .select("*")
+    .single();
+
+  if (insertError) {
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Add Blocker to Task
+ */
+app.post("/add_blocker", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: insertError } = await supabase
+    .from("pm_task_blockers")
+    .insert({
+      task_id: schema?.taskID,
+      blocker_task_id: schema?.blocker_task_id,
+      project_id: workspaceId,
+    })
+    .select("*")
+    .single();
+
+  if (insertError) {
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Remove Blocker from Task
+ */
+app.post("/remove_blocker", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("pm_task_blockers")
+    .delete()
+    .eq("task_id", schema?.taskID)
+    .eq("blocker_task_id", schema?.blocker_task_id)
+    .eq("project_id", workspaceId);
+
+  if (deleteError) {
+    res.status(500).json({ error: deleteError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data: { removed: true, task_id: schema?.taskID, blocker_task_id: schema?.blocker_task_id }, api_usage: auth.api_usage });
+});
+
+/**
+ * Get Labels for Workspace
+ */
+app.post("/get_labels", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: labelsError } = await supabase
+    .from("pm_labels")
+    .select("*")
+    .eq("project_id", workspaceId);
+
+  if (labelsError) {
+    res.status(500).json({ error: labelsError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Add Label to Task
+ */
+app.post("/add_label_to_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: insertError } = await supabase
+    .from("pm_task_labels")
+    .insert({
+      task_id: schema?.taskID,
+      label_id: schema?.label_id,
+      project_id: workspaceId,
+    })
+    .select("*")
+    .single();
+
+  if (insertError) {
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Remove Label from Task
+ */
+app.post("/remove_label_from_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("pm_task_labels")
+    .delete()
+    .eq("task_id", schema?.taskID)
+    .eq("label_id", schema?.label_id)
+    .eq("project_id", workspaceId);
+
+  if (deleteError) {
+    res.status(500).json({ error: deleteError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data: { removed: true, task_id: schema?.taskID, label_id: schema?.label_id }, api_usage: auth.api_usage });
+});
+
+/**
+ * Get Task Commits
+ */
+app.post("/get_task_commits", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: commitsError } = await supabase
+    .from("pm_task_commits")
+    .select("*")
+    .eq("task_id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .order("created_at", { ascending: false });
+
+  if (commitsError) {
+    res.status(500).json({ error: commitsError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Link Commit to Task
+ */
+app.post("/link_commit_to_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data: userId, error: userError } = await getUserProfile(apiKey);
+  if (!userId || userError) {
+    res.status(401).json({ error: "Unauthorized", api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: insertError } = await supabase
+    .from("pm_task_commits")
+    .insert({
+      task_id: schema?.taskID,
+      project_id: workspaceId,
+      commit_sha: schema?.commit_sha,
+      repo_name: schema?.repo_name,
+      commit_message: schema?.commit_message || null,
+      commit_author: schema?.commit_author || null,
+      linked_by: userId,
+    })
+    .select("*")
+    .single();
+
+  if (insertError) {
+    res.status(500).json({ error: insertError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Get Teams for Workspace
+ */
+app.post("/get_teams", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: teamsError } = await supabase
+    .from("pm_teams")
+    .select("*")
+    .eq("project_id", workspaceId);
+
+  if (teamsError) {
+    res.status(500).json({ error: teamsError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Get Team Members
+ */
+app.post("/get_team_members", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  const { data, error: membersError } = await supabase
+    .from("pm_team_members")
+    .select(`
+      *,
+      profiles:user_id (
+        id,
+        email,
+        full_name,
+        avatar_url
+      )
+    `)
+    .eq("team_id", schema?.team_id)
+    .eq("project_id", workspaceId);
+
+  if (membersError) {
+    res.status(500).json({ error: membersError.message, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({ data, api_usage: auth.api_usage });
+});
+
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Privileged middleware server running on port ${PORT}`);

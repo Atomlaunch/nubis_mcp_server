@@ -67,7 +67,7 @@ async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, s
 // Get Boltz -> to save IDs for use in tasks later
 server.tool(
   "get_boltz",
-  "Fetch all boltz for a workspace",
+  "Retrieve all project branches (boltz) for the workspace. Boltz are like sprints or project phases that group related tasks. Use this first to get bolt_id values for filtering tasks by project area. Returns: id, name, description, status for each bolt.",
   async () => {
     const json = await getResultsFromMiddleware({
       endpoint: 'get_boltz',
@@ -99,11 +99,11 @@ type McpContentItem =
 // Get Tasks -> Get tasks for a workspace
 server.tool(
   "get_tasks",
-  "Get tasks for a workspace, including subtasks, boltz, and github details/file paths",
+  "List tasks from the workspace kanban board. Returns task details including title, description, board status, GitHub file references, blockers, and images. Use board filter to see tasks by status, bolt_id to filter by project area. Start here to find tasks to work on.",
   {
-    limit: z.number().optional().default(5),
-    board: z.enum(['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed']).optional(),
-    bolt_id: z.string().optional(),
+    limit: z.number().optional().default(5).describe("Maximum tasks to return (default: 5)"),
+    board: z.enum(['bugs', 'backlog', 'priority', 'in-progress', 'reviewing', 'completed']).optional().describe("Filter by kanban board: bugs=issues, backlog=planned, priority=up next, in-progress=active, reviewing=needs review, completed=done"),
+    bolt_id: z.string().optional().describe("Filter by bolt/project branch UUID (get from get_boltz)"),
   },
   async ({ limit, board, bolt_id }) => {
     try {
@@ -174,9 +174,9 @@ server.tool(
  */
 server.tool(
   "get_task_details",
-  "Get a task by ID",
+  "Get complete details for a single task including subtasks, comments, and blocker information. Use after get_tasks to dive deeper into a specific task. Returns full task object with nested subtasks and comments arrays.",
   {
-    taskID: z.string(),
+    taskID: z.string().describe("UUID of the task to retrieve"),
   },
   async ({ taskID }) => {
     const json = await getResultsFromMiddleware({
@@ -206,9 +206,9 @@ server.tool(
  */
 server.tool(
   "get_task_context",
-  "Get context for a task",
+  "Retrieve implementation notes and context saved for a task. Context contains developer notes, code snippets, decisions, or any text added via add_context_to_task. Use to understand previous work or decisions on a task.",
   {
-    taskID: z.string(),
+    taskID: z.string().describe("UUID of the task"),
   },
   async ({ taskID }) => {
     const json = await getResultsFromMiddleware({
@@ -239,10 +239,10 @@ server.tool(
  */
 server.tool(
   "add_context_to_task",
-  "Add context to a task",
+  "Save implementation notes, code context, or developer notes to a task. Use this to document decisions, add code snippets, or save progress notes that will help future work on this task. Context is appended (not replaced).",
   {
-    taskID: z.string(),
-    context: z.string(),
+    taskID: z.string().describe("UUID of the task to add context to"),
+    context: z.string().describe("Text content to save - can include code snippets, notes, decisions, or any relevant information"),
   },
   async ({ taskID, context }) => {
     const json = await getResultsFromMiddleware({
@@ -271,9 +271,9 @@ server.tool(
 // Get Task Images -> Get images for a task
 server.tool(
   "get_task_images",
-  "Get/View images for a task",
+  "Retrieve image attachments for a task. Returns URLs of images attached to the task, useful for viewing mockups, screenshots, or design references. Use when you need to see visual context for a task.",
   {
-    taskID: z.string(),
+    taskID: z.string().describe("UUID of the task to get images for"),
   },
   async ({ taskID }) => {
     const json = await getResultsFromMiddleware({
@@ -301,9 +301,9 @@ server.tool(
 // Work on Task -> Work on a task
 server.tool(
   "work_on_task",
-  "Work on a task",
+  "Start working on a task. Fetches full task details and checks for blockers. If the task has unresolved blockers, returns an error with blocker IDs. Use this when ready to begin implementation - it provides all context needed and validates the task is ready to work on.",
   {
-    taskID: z.string(),
+    taskID: z.string().describe("UUID of the task to work on"),
   },
   async ({ taskID }) => {
     // Step 1: Fetch task details
@@ -391,10 +391,10 @@ server.tool(
 // Move Task -> Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']
 server.tool(
   "move_task",
-  "Move a task to ['backlog', 'priority', 'in-progress','reviewing', 'completed']",
+  "Move a task to a different kanban board column. Use to update task status as work progresses: backlog (planned) -> priority (up next) -> in-progress (active) -> reviewing (needs review) -> completed (done).",
   {
-    taskID: z.string(),
-    board: z.enum(['backlog', 'priority', 'in-progress','reviewing', 'completed']),
+    taskID: z.string().describe("UUID of the task to move"),
+    board: z.enum(['backlog', 'priority', 'in-progress','reviewing', 'completed']).describe("Target board: backlog=planned, priority=up next, in-progress=active work, reviewing=needs review, completed=done"),
   },
   async ({ taskID, board }) => {
     const json = await getResultsFromMiddleware({
@@ -423,16 +423,16 @@ server.tool(
 // Create Task -> Create a new task
 server.tool(
   "create_task",
-  "Create a new task or subtask (parent_task_id is required for subtasks)",
+  "Create a new task or subtask in the workspace. Tasks are created in backlog by default. Link to GitHub files/directories to associate code with tasks. Use parent_task_id to create subtasks under a parent task.",
   {
-    title: z.string(),
-    description: z.string().optional(),
-    board: z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog'),
-    parent_task_id: z.string().optional(),
-    github_item_type: z.string().optional(), // file or dir
-    github_file_path: z.string().optional(), // src/components/modal
-    github_repo_name: z.string().optional(), // Atomlaunch/atom_frontend
-    bolt_id: z.string().optional()
+    title: z.string().describe("Task title - brief description of what needs to be done"),
+    description: z.string().optional().describe("Detailed description, acceptance criteria, or implementation notes"),
+    board: z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().default('backlog').describe("Initial board placement (default: backlog)"),
+    parent_task_id: z.string().optional().describe("UUID of parent task - makes this a subtask"),
+    github_item_type: z.string().optional().describe("Type of GitHub reference: 'file' or 'dir'"),
+    github_file_path: z.string().optional().describe("Path in repo, e.g., 'src/components/Modal.tsx'"),
+    github_repo_name: z.string().optional().describe("Repository in format 'owner/repo', e.g., 'Atomlaunch/nubis'"),
+    bolt_id: z.string().optional().describe("UUID of bolt/project branch to assign task to")
   },
   async ({ title, description, board, parent_task_id, github_item_type, github_file_path, github_repo_name, bolt_id }) => {
     const json = await getResultsFromMiddleware({
@@ -467,17 +467,17 @@ server.tool(
 // Update Task -> Update an existing task
 server.tool(
   "update_task",
-  "Update an existing task (title, description, bolt_id, parent_task_id)",
+  "Update an existing task's properties. Only provide fields you want to change - others remain unchanged. Can update title, description, board, GitHub references, and parent/bolt assignments.",
   {
-    taskID: z.string(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    board: z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional(),
-    bolt_id: z.string().optional(),
-    parent_task_id: z.string().optional(),
-    github_item_type: z.string().optional(),
-    github_file_path: z.string().optional(),
-    github_repo_name: z.string().optional(),
+    taskID: z.string().describe("UUID of the task to update"),
+    title: z.string().optional().describe("New task title"),
+    description: z.string().optional().describe("New description"),
+    board: z.enum(['backlog', 'bugs', 'in-progress', 'priority', 'reviewing', 'completed']).optional().describe("Move to different board"),
+    bolt_id: z.string().optional().describe("Assign to different bolt/project branch"),
+    parent_task_id: z.string().optional().describe("Change parent task (for subtasks)"),
+    github_item_type: z.string().optional().describe("Type: 'file' or 'dir'"),
+    github_file_path: z.string().optional().describe("Path in repo"),
+    github_repo_name: z.string().optional().describe("Repository in 'owner/repo' format"),
   },
   async ({ taskID, title, description, board, bolt_id, parent_task_id, github_item_type, github_file_path, github_repo_name }) => {
     const json = await getResultsFromMiddleware({
@@ -492,6 +492,318 @@ server.tool(
         github_item_type,
         github_file_path,
         github_repo_name
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Add Comment -> Add a comment to a task
+server.tool(
+  "add_comment",
+  "Add a comment to a task for discussion or status updates. Comments are visible to all workspace members.",
+  {
+    taskID: z.string().describe("UUID of the task to comment on"),
+    content: z.string().describe("Comment text"),
+    parent_id: z.string().optional().describe("UUID of parent comment for replies")
+  },
+  async ({ taskID, content, parent_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'add_comment',
+      schema: {
+        taskID,
+        content,
+        parent_id
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Add Blocker -> Mark a task as blocked by another
+server.tool(
+  "add_blocker",
+  "Mark a task as blocked by another task. The blocked task cannot be worked on until the blocker is resolved (moved to completed).",
+  {
+    taskID: z.string().describe("UUID of the task being blocked"),
+    blocker_task_id: z.string().describe("UUID of the blocking task")
+  },
+  async ({ taskID, blocker_task_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'add_blocker',
+      schema: {
+        taskID,
+        blocker_task_id
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Remove Blocker -> Remove a blocking relationship
+server.tool(
+  "remove_blocker",
+  "Remove a blocking dependency, allowing the task to be worked on.",
+  {
+    taskID: z.string().describe("UUID of the blocked task"),
+    blocker_task_id: z.string().describe("UUID of the blocker to remove")
+  },
+  async ({ taskID, blocker_task_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'remove_blocker',
+      schema: {
+        taskID,
+        blocker_task_id
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Get Labels -> List all workspace labels
+server.tool(
+  "get_labels",
+  "List all labels available in the workspace for categorizing tasks. Returns label name, color, and description.",
+  {},
+  async () => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'get_labels',
+      schema: {}
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Add Label to Task -> Add a label to a task
+server.tool(
+  "add_label_to_task",
+  "Add a label to a task for categorization. Get available labels with get_labels first.",
+  {
+    taskID: z.string().describe("UUID of the task"),
+    label_id: z.string().describe("UUID of the label to add")
+  },
+  async ({ taskID, label_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'add_label_to_task',
+      schema: {
+        taskID,
+        label_id
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Remove Label from Task -> Remove a label from a task
+server.tool(
+  "remove_label_from_task",
+  "Remove a label from a task.",
+  {
+    taskID: z.string().describe("UUID of the task"),
+    label_id: z.string().describe("UUID of the label to remove")
+  },
+  async ({ taskID, label_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'remove_label_from_task',
+      schema: {
+        taskID,
+        label_id
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Get Task Commits -> Get git commits linked to a task
+server.tool(
+  "get_task_commits",
+  "Get all git commits linked to a task. Shows commit SHA, message, author, and date.",
+  {
+    taskID: z.string().describe("UUID of the task")
+  },
+  async ({ taskID }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'get_task_commits',
+      schema: {
+        taskID
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Link Commit to Task -> Link a git commit to a task
+server.tool(
+  "link_commit_to_task",
+  "Link a git commit to a task for traceability. Associates code changes with task work.",
+  {
+    taskID: z.string().describe("UUID of the task"),
+    commit_sha: z.string().describe("Git commit SHA"),
+    repo_name: z.string().describe("Repository in 'owner/repo' format"),
+    commit_message: z.string().optional().describe("Commit message"),
+    commit_author: z.string().optional().describe("Commit author name")
+  },
+  async ({ taskID, commit_sha, repo_name, commit_message, commit_author }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'link_commit_to_task',
+      schema: {
+        taskID,
+        commit_sha,
+        repo_name,
+        commit_message,
+        commit_author
+      }
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Get Teams -> List workspace teams
+server.tool(
+  "get_teams",
+  "List all teams in the workspace. Returns team name, description, and color.",
+  {},
+  async () => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'get_teams',
+      schema: {}
+    });
+    if (!json.data) throw new Error('No data returned from middleware');
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(json.data),
+        },
+        {
+          type: "text",
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+        }
+      ],
+    };
+  }
+);
+
+// Get Team Members -> Get members of a team
+server.tool(
+  "get_team_members",
+  "Get all members of a team with their roles and profile info.",
+  {
+    team_id: z.string().describe("UUID of the team")
+  },
+  async ({ team_id }) => {
+    const json = await getResultsFromMiddleware({
+      endpoint: 'get_team_members',
+      schema: {
+        team_id
       }
     });
     if (!json.data) throw new Error('No data returned from middleware');
