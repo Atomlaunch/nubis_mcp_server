@@ -843,12 +843,24 @@ app.post("/add_label_to_task", async (req: Request, res: Response): Promise<void
     return;
   }
 
+  // Verify task belongs to workspace
+  const { data: task, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("id")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+
+  if (taskError || !task) {
+    res.status(404).json({ error: "Task not found in workspace", api_usage: auth.api_usage });
+    return;
+  }
+
   const { data, error: insertError } = await supabase
     .from("pm_task_labels")
     .insert({
       task_id: schema?.taskID,
       label_id: schema?.label_id,
-      project_id: workspaceId,
     })
     .select("*")
     .single();
@@ -876,12 +888,24 @@ app.post("/remove_label_from_task", async (req: Request, res: Response): Promise
     return;
   }
 
+  // Verify task belongs to workspace
+  const { data: task, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("id")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+
+  if (taskError || !task) {
+    res.status(404).json({ error: "Task not found in workspace", api_usage: auth.api_usage });
+    return;
+  }
+
   const { error: deleteError } = await supabase
     .from("pm_task_labels")
     .delete()
     .eq("task_id", schema?.taskID)
-    .eq("label_id", schema?.label_id)
-    .eq("project_id", workspaceId);
+    .eq("label_id", schema?.label_id);
 
   if (deleteError) {
     res.status(500).json({ error: deleteError.message, api_usage: auth.api_usage });
@@ -906,12 +930,24 @@ app.post("/get_task_commits", async (req: Request, res: Response): Promise<void>
     return;
   }
 
+  // Verify task belongs to workspace
+  const { data: task, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("id")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+
+  if (taskError || !task) {
+    res.status(404).json({ error: "Task not found in workspace", api_usage: auth.api_usage });
+    return;
+  }
+
   const { data, error: commitsError } = await supabase
     .from("pm_task_commits")
     .select("*")
     .eq("task_id", schema?.taskID)
-    .eq("project_id", workspaceId)
-    .order("created_at", { ascending: false });
+    .order("linked_at", { ascending: false });
 
   if (commitsError) {
     res.status(500).json({ error: commitsError.message, api_usage: auth.api_usage });
@@ -942,11 +978,23 @@ app.post("/link_commit_to_task", async (req: Request, res: Response): Promise<vo
     return;
   }
 
+  // Verify task belongs to workspace
+  const { data: task, error: taskError } = await supabase
+    .from("pm_tasks")
+    .select("id")
+    .eq("id", schema?.taskID)
+    .eq("project_id", workspaceId)
+    .single();
+
+  if (taskError || !task) {
+    res.status(404).json({ error: "Task not found in workspace", api_usage: auth.api_usage });
+    return;
+  }
+
   const { data, error: insertError } = await supabase
     .from("pm_task_commits")
     .insert({
       task_id: schema?.taskID,
-      project_id: workspaceId,
       commit_sha: schema?.commit_sha,
       repo_name: schema?.repo_name,
       commit_message: schema?.commit_message || null,
