@@ -116,7 +116,43 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       }
     }
 
-    // Check API Usage
+    // Query workspace subscription to get plan limits
+    const { data: subscription } = await supabase
+      .from("workspace_subscriptions")
+      .select(`
+        status,
+        subscription_plans (
+          name,
+          price_monthly,
+          features
+        )
+      `)
+      .eq("project_id", workspaceId)
+      .eq("status", "active")
+      .single();
+
+    // Extract plan info - default to free tier limits if no subscription
+    const priceMonthly = (subscription?.subscription_plans as any)?.price_monthly || 0;
+    const isPaidPlan = priceMonthly > 0;
+    const planName = (subscription?.subscription_plans as any)?.name || "Stratus";
+
+    // For paid plans, skip limit checking entirely (unlimited API calls)
+    if (isPaidPlan) {
+      console.log(
+        `API call for workspace ${workspaceId} on paid plan "${planName}" - unlimited calls`
+      );
+      return {
+        success: true,
+        error: null,
+        api_usage: {
+          remaining_calls: "unlimited",
+          total_limit: "unlimited",
+          plan: planName
+        }
+      };
+    }
+
+    // For free plans, check and enforce API usage limits
     const { data: apiUsageData, error: apiUsageError } = await supabase
       .from("api_usage")
       .select("*")
@@ -135,9 +171,9 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
         success: false,
         error: "API usage limit exceeded",
         api_usage: {
-          count: "descending",
           remaining_calls: apiUsageData.remaining_calls,
-          total_limit: apiUsageData.total_limit
+          total_limit: apiUsageData.total_limit,
+          plan: planName
         }
       };
     }
@@ -153,14 +189,14 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
         success: false,
         error: "Failed to update API usage",
         api_usage: {
-          count: "descending",
           remaining_calls: apiUsageData.remaining_calls,
-          total_limit: apiUsageData.total_limit
+          total_limit: apiUsageData.total_limit,
+          plan: planName
         }
       };
     }
     console.log(
-      `API usage updated for workspace ${workspaceId}, Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`
+      `API usage updated for workspace ${workspaceId} on plan "${planName}", Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`
     );
 
     // Return if user has access to workspace
@@ -168,9 +204,9 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       success: true,
       error: null,
       api_usage: {
-        count: "descending",
         remaining_calls: apiUsageData.remaining_calls - 1,
-        total_limit: apiUsageData.total_limit
+        total_limit: apiUsageData.total_limit,
+        plan: planName
       }
     };
   } catch (error) {
