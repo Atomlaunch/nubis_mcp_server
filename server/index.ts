@@ -33,13 +33,13 @@ app.use(express.json());
 
 // Rate limit middleware
 const apiLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 10 minutes
-  max: 50, // limit each IP to 50 requests per windowMs
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 5000, // limit each IP to 50 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   message: {
     error:
-      "Too many requests, please try again later. (50 requests per 10 minutes)",
+      "Too many requests, please try again later. (500 requests per 5 minutes)",
   },
 });
 
@@ -586,7 +586,7 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     .insert({
       title: schema?.title,
       description: schema?.description,
-      board: schema?.board || "backlog",
+      board: schema?.board || "inbox",
       parent_task_id: schema?.parent_task_id || null,
       project_id: workspaceId,
       sort_order: (maxSortOrder?.sort_order || 0) + 1000,
@@ -646,7 +646,7 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .update({
       title: schema?.title,
       description: schema?.description,
-      board: schema?.board || task?.board || "backlog",
+      board: schema?.board || task?.board || "inbox",
       branch_id: schema?.bolt_id || task?.branch_id || null,
       parent_task_id: schema?.parent_task_id || task?.parent_task_id || null,
       github_item_type: schema?.github_item_type || task?.github_item_type || null,
@@ -712,7 +712,7 @@ app.post(
         schema?.tasks.map((task: any) => ({
           title: task.title,
           description: task.description,
-          board: task.board || "backlog",
+          board: task.board || "inbox",
           parent_task_id: task.parent_task_id || null,
           project_id: workspaceId,
           sort_order: (maxSortOrder?.sort_order || 0) + 1000,
