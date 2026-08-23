@@ -8,6 +8,7 @@ const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
 const dotenv_1 = __importDefault(require("dotenv"));
+const credentials_js_1 = require("./credentials.js");
 dotenv_1.default.config();
 // Polyfill fetch for older Node.js versions or environments without native fetch
 // This must be done before any fetch calls are made
@@ -25,9 +26,6 @@ async function ensureFetch() {
     }
     return fetchImpl;
 }
-// Register nubis tools
-const cliWorkspaceID = process.env.NUBIS_WORKSPACE_ID;
-const cliApiKey = process.env.NUBIS_API_KEY;
 // Create server instance
 const server = new mcp_js_1.McpServer({
     name: "nubis-mcp-server",
@@ -39,6 +37,7 @@ const server = new mcp_js_1.McpServer({
 });
 // Helper to get results from middleware
 async function getResultsFromMiddleware({ endpoint, schema }) {
+    const { workspaceId, apiKey } = (0, credentials_js_1.resolveClientCredentials)();
     const fetch = await ensureFetch();
     const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
         method: 'POST',
@@ -46,8 +45,8 @@ async function getResultsFromMiddleware({ endpoint, schema }) {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            workspaceId: cliWorkspaceID,
-            apiKey: cliApiKey,
+            workspaceId,
+            apiKey,
             schema: schema
         }),
     });
