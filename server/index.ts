@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 
 // Register all new endpoints from server/endpoints here for maintainability
 import { registerAddContextToTaskEndpoint } from "./endpoints/add-context-to-task.js";
+import { credentialsFromRequest } from "./request-auth.js";
 
 dotenv.config();
 
@@ -62,8 +63,20 @@ app.use((req, res, next) => {
 // Helper to validate API key and return a Supabase client for the user
 export async function checkUserApiKey(apiKey: string, workspaceId: string) {
   try {
-    if (!workspaceId) throw new Error("workspaceId is required");
-    if (!apiKey) throw new Error("apiKey is required");
+    if (!workspaceId) {
+      return {
+        success: false,
+        error: "workspaceId is required",
+        api_usage: null
+      };
+    }
+    if (!apiKey) {
+      return {
+        success: false,
+        error: "apiKey is required",
+        api_usage: null
+      };
+    }
     // Validate apiKey in api_key table
     const { data, error } = await supabase
       .from("api_keys")
@@ -756,11 +769,7 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
  * Missing IDs are reported instead of failing the request.
  */
 app.post("/delete_task", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, schema } = req.body as {
-    workspaceId: string;
-    apiKey: string;
-    schema: any;
-  };
+  const { workspaceId, apiKey, schema } = credentialsFromRequest(req);
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
     res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
@@ -792,11 +801,7 @@ app.post("/delete_task", async (req: Request, res: Response): Promise<void> => {
  * Missing IDs are reported per id; the rest of the batch still deletes.
  */
 app.post("/delete_tasks", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, schema } = req.body as {
-    workspaceId: string;
-    apiKey: string;
-    schema: any;
-  };
+  const { workspaceId, apiKey, schema } = credentialsFromRequest(req);
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
     res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
