@@ -238,6 +238,93 @@ export async function getUserProfile(apiKey: string) {
   }
 }
 
+const TASK_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type DeletedTaskSummary = {
+  id: string;
+  title: string;
+  task_number: number | null;
+  board: string | null;
+};
+
+/**
+ * Delete tasks that belong to the authenticated workspace only.
+ * Related rows (comments, labels, blockers, commits, assignments) cascade in the DB.
+ * Missing / invalid / other-workspace IDs are reported instead of failing the batch.
+ */
+export async function deleteWorkspaceTasks(
+  workspaceId: string,
+  taskIDs: unknown[]
+): Promise<{ deleted: DeletedTaskSummary[]; missing: string[]; error: string | null }> {
+  const uniqueIds: string[] = [];
+  const seen = new Set<string>();
+  for (const rawId of taskIDs) {
+    if (typeof rawId !== "string") continue;
+    const id = rawId.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    uniqueIds.push(id);
+  }
+
+  if (uniqueIds.length === 0) {
+    return { deleted: [], missing: [], error: null };
+  }
+
+  const invalidOrMalformed = uniqueIds.filter((id) => !TASK_ID_UUID_RE.test(id));
+  const lookupIds = uniqueIds.filter((id) => TASK_ID_UUID_RE.test(id));
+
+  if (lookupIds.length === 0) {
+    return { deleted: [], missing: invalidOrMalformed, error: null };
+  }
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("pm_tasks")
+    .select("id, title, task_number, board")
+    .eq("project_id", workspaceId)
+    .in("id", lookupIds);
+
+  if (lookupError) {
+    return { deleted: [], missing: [], error: lookupError.message };
+  }
+
+  const foundIds = new Set((existing || []).map((task) => task.id as string));
+  const missing = uniqueIds.filter((id) => !foundIds.has(id));
+  const toDelete = lookupIds.filter((id) => foundIds.has(id));
+
+  if (toDelete.length === 0) {
+    return { deleted: [], missing, error: null };
+  }
+
+  // pm_tasks.blocked_by_task_id is ON DELETE NO ACTION; clear same-workspace refs first.
+  const { error: unblockError } = await supabase
+    .from("pm_tasks")
+    .update({ blocked_by_task_id: null })
+    .eq("project_id", workspaceId)
+    .in("blocked_by_task_id", toDelete);
+
+  if (unblockError) {
+    return { deleted: [], missing, error: unblockError.message };
+  }
+
+  const { data: deletedRows, error: deleteError } = await supabase
+    .from("pm_tasks")
+    .delete()
+    .eq("project_id", workspaceId)
+    .in("id", toDelete)
+    .select("id, title, task_number, board");
+
+  if (deleteError) {
+    return { deleted: [], missing, error: deleteError.message };
+  }
+
+  return {
+    deleted: (deletedRows || []) as DeletedTaskSummary[],
+    missing,
+    error: null,
+  };
+}
+
 /**
  * Get all Boltz
  */
@@ -662,6 +749,78 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     return;
   }
   res.json({ data, api_usage: auth.api_usage });
+});
+
+/**
+ * Delete a single task in the authenticated workspace.
+ * Missing IDs are reported instead of failing the request.
+ */
+app.post("/delete_task", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  if (typeof schema?.taskID !== "string" || !schema.taskID.trim()) {
+    res.status(400).json({ error: "taskID is required", api_usage: auth.api_usage });
+    return;
+  }
+
+  const result = await deleteWorkspaceTasks(workspaceId, [schema.taskID]);
+  if (result.error) {
+    res.status(500).json({ error: result.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({
+    data: {
+      deleted: result.deleted[0] || null,
+      missing: result.missing,
+    },
+    api_usage: auth.api_usage,
+  });
+});
+
+/**
+ * Delete multiple tasks in the authenticated workspace.
+ * Missing IDs are reported per id; the rest of the batch still deletes.
+ */
+app.post("/delete_tasks", async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, apiKey, schema } = req.body as {
+    workspaceId: string;
+    apiKey: string;
+    schema: any;
+  };
+  const auth = await checkUserApiKey(apiKey, workspaceId);
+  if (!auth.success) {
+    res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  if (!Array.isArray(schema?.taskIDs)) {
+    res.status(400).json({ error: "taskIDs must be an array", api_usage: auth.api_usage });
+    return;
+  }
+
+  const result = await deleteWorkspaceTasks(workspaceId, schema.taskIDs);
+  if (result.error) {
+    res.status(500).json({ error: result.error, api_usage: auth.api_usage });
+    return;
+  }
+
+  res.json({
+    data: {
+      deleted: result.deleted,
+      missing: result.missing,
+    },
+    api_usage: auth.api_usage,
+  });
 });
 
 /**

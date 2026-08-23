@@ -64,6 +64,30 @@ Parameters:
 - board: 'backlog' | 'in-progress' | 'reviewing' | 'completed' (required)
 ```
 
+### `delete_task`
+Deletes a single task in the authenticated workspace. Related comments, labels, blockers, commits, and assignments are removed with the task. Missing IDs are reported instead of failing. Never deletes across workspaces.
+
+```
+Parameters:
+- taskID: string (required) — UUID of the task to delete
+
+Returns:
+- deleted: { id, title, task_number, board } | null
+- missing: string[] — IDs not found in this workspace
+```
+
+### `delete_tasks`
+Deletes multiple tasks in the authenticated workspace. If some IDs are missing, those are reported and the rest of the batch still deletes. Never deletes across workspaces.
+
+```
+Parameters:
+- taskIDs: string[] (required) — UUIDs of the tasks to delete
+
+Returns:
+- deleted: { id, title, task_number, board }[]
+- missing: string[] — IDs not found in this workspace
+```
+
 ## Configuration in AI Tools
 
 To use this MCP server with AI assistants that support MCP, add the following configuration:
