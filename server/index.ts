@@ -261,8 +261,11 @@ export async function deleteWorkspaceTasks(
   const seen = new Set<string>();
   for (const rawId of taskIDs) {
     if (typeof rawId !== "string") continue;
-    const id = rawId.trim();
-    if (!id || seen.has(id)) continue;
+    const trimmed = rawId.trim();
+    if (!trimmed) continue;
+    // Postgres returns UUIDs lowercase; canonicalize so Set membership matches.
+    const id = TASK_ID_UUID_RE.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+    if (seen.has(id)) continue;
     seen.add(id);
     uniqueIds.push(id);
   }
@@ -288,15 +291,26 @@ export async function deleteWorkspaceTasks(
     return { deleted: [], missing: [], error: lookupError.message };
   }
 
-  const foundIds = new Set((existing || []).map((task) => task.id as string));
-  const missing = uniqueIds.filter((id) => !foundIds.has(id));
-  const toDelete = lookupIds.filter((id) => foundIds.has(id));
+  const toDelete = (existing || []).map((task) => task.id as string);
+  const foundIds = new Set(toDelete.map((id) => id.toLowerCase()));
+  const missing = uniqueIds.filter((id) => !foundIds.has(id.toLowerCase()));
 
   if (toDelete.length === 0) {
     return { deleted: [], missing, error: null };
   }
 
   // pm_tasks.blocked_by_task_id is ON DELETE NO ACTION; clear same-workspace refs first.
+  // Snapshot dependents so blocker links can be restored if the delete later fails.
+  const { data: blockedDependents, error: blockedLookupError } = await supabase
+    .from("pm_tasks")
+    .select("id, blocked_by_task_id")
+    .eq("project_id", workspaceId)
+    .in("blocked_by_task_id", toDelete);
+
+  if (blockedLookupError) {
+    return { deleted: [], missing, error: blockedLookupError.message };
+  }
+
   const { error: unblockError } = await supabase
     .from("pm_tasks")
     .update({ blocked_by_task_id: null })
@@ -315,6 +329,17 @@ export async function deleteWorkspaceTasks(
     .select("id, title, task_number, board");
 
   if (deleteError) {
+    if (blockedDependents && blockedDependents.length > 0) {
+      await Promise.all(
+        blockedDependents.map((row) =>
+          supabase
+            .from("pm_tasks")
+            .update({ blocked_by_task_id: row.blocked_by_task_id })
+            .eq("id", row.id)
+            .eq("project_id", workspaceId)
+        )
+      );
+    }
     return { deleted: [], missing, error: deleteError.message };
   }
 
