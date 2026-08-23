@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import dotenv from 'dotenv';
+import { resolveClientCredentials } from "./credentials.js";
 
 dotenv.config();
 
@@ -24,11 +25,7 @@ async function ensureFetch(): Promise<typeof fetch> {
   return fetchImpl;
 }
 
-// Register nubis tools
-const cliWorkspaceID: string | undefined = process.env.NUBIS_WORKSPACE_ID;
-const cliApiKey: string | undefined = process.env.NUBIS_API_KEY;
-
-  // Create server instance
+// Create server instance
 const server = new McpServer({
   name: "nubis-mcp-server",
   version: "1.0.0",
@@ -40,6 +37,7 @@ const server = new McpServer({
 
 // Helper to get results from middleware
 async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, schema: any}) {
+  const { workspaceId, apiKey } = resolveClientCredentials();
   const fetch = await ensureFetch();
   const response = await fetch('https://mcp-server.nubis.app/' + endpoint, {
     method: 'POST',
@@ -47,8 +45,8 @@ async function getResultsFromMiddleware({endpoint, schema}: {endpoint: string, s
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      workspaceId: cliWorkspaceID,
-      apiKey: cliApiKey,
+      workspaceId,
+      apiKey,
       schema: schema
     }),
   });
