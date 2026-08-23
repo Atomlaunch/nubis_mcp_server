@@ -431,6 +431,56 @@ server.tool("update_task", "Update an existing task's properties. Only provide f
         ],
     };
 });
+// Delete Task -> Delete a single task in the authenticated workspace
+server.tool("delete_task", "Delete a single task from the authenticated workspace. Related comments, labels, blockers, commits, and assignments are removed with the task. Returns the deleted task, or reports the ID as missing if it is not in this workspace. Never deletes across workspaces.", {
+    taskID: zod_1.z.string().describe("UUID of the task to delete"),
+}, async ({ taskID }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'delete_task',
+        schema: {
+            taskID
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
+// Delete Tasks -> Delete multiple tasks in the authenticated workspace
+server.tool("delete_tasks", "Delete multiple tasks from the authenticated workspace. Missing or other-workspace IDs are reported without failing the rest of the batch. Related comments, labels, blockers, commits, and assignments are removed with each deleted task. Never deletes across workspaces.", {
+    taskIDs: zod_1.z.array(zod_1.z.string()).describe("UUIDs of the tasks to delete"),
+}, async ({ taskIDs }) => {
+    const json = await getResultsFromMiddleware({
+        endpoint: 'delete_tasks',
+        schema: {
+            taskIDs
+        }
+    });
+    if (!json.data)
+        throw new Error('No data returned from middleware');
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(json.data),
+            },
+            {
+                type: "text",
+                text: `API Usage: ${JSON.stringify(json.api_usage)}`,
+            }
+        ],
+    };
+});
 // Add Comment -> Add a comment to a task
 server.tool("add_comment", "Add a comment to a task for discussion or status updates. Comments are visible to all workspace members.", {
     taskID: zod_1.z.string().describe("UUID of the task to comment on"),
