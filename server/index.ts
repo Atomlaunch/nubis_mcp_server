@@ -7,7 +7,11 @@ import rateLimit from "express-rate-limit";
 
 // Register all new endpoints from server/endpoints here for maintainability
 import { registerAddContextToTaskEndpoint } from "./endpoints/add-context-to-task.js";
-import { credentialsFromRequest } from "./request-auth.js";
+import {
+  credentialsFromRequest,
+  taskIDFromBody,
+  taskIDsFromBody,
+} from "./request-auth.js";
 
 dotenv.config();
 
@@ -769,19 +773,20 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
  * Missing IDs are reported instead of failing the request.
  */
 app.post("/delete_task", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, schema } = credentialsFromRequest(req);
+  const { workspaceId, apiKey } = credentialsFromRequest(req);
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
     res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
-  if (typeof schema?.taskID !== "string" || !schema.taskID.trim()) {
+  const taskID = taskIDFromBody(req.body ?? {});
+  if (!taskID) {
     res.status(400).json({ error: "taskID is required", api_usage: auth.api_usage });
     return;
   }
 
-  const result = await deleteWorkspaceTasks(workspaceId, [schema.taskID]);
+  const result = await deleteWorkspaceTasks(workspaceId, [taskID]);
   if (result.error) {
     res.status(500).json({ error: result.error, api_usage: auth.api_usage });
     return;
@@ -801,19 +806,20 @@ app.post("/delete_task", async (req: Request, res: Response): Promise<void> => {
  * Missing IDs are reported per id; the rest of the batch still deletes.
  */
 app.post("/delete_tasks", async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, apiKey, schema } = credentialsFromRequest(req);
+  const { workspaceId, apiKey } = credentialsFromRequest(req);
   const auth = await checkUserApiKey(apiKey, workspaceId);
   if (!auth.success) {
     res.status(401).json({ error: auth.error, api_usage: auth.api_usage });
     return;
   }
 
-  if (!Array.isArray(schema?.taskIDs)) {
+  const taskIDs = taskIDsFromBody(req.body ?? {});
+  if (!taskIDs) {
     res.status(400).json({ error: "taskIDs must be an array", api_usage: auth.api_usage });
     return;
   }
 
-  const result = await deleteWorkspaceTasks(workspaceId, schema.taskIDs);
+  const result = await deleteWorkspaceTasks(workspaceId, taskIDs);
   if (result.error) {
     res.status(500).json({ error: result.error, api_usage: auth.api_usage });
     return;
