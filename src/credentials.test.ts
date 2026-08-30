@@ -156,7 +156,125 @@ function middlewareBody(workspaceId: string | undefined, apiKey: string | undefi
   env.NUBIS_API_KEY = "key-later";
   const creds = resolveClientCredentials({ env, argv: [] });
   assert.equal(creds.workspaceId, "ws-later");
-  assert.equal(creds.apiKey, "key-later");
+  assert.equal(creds.authKind, "workspace_api_key");
+  if (creds.authKind === "workspace_api_key") {
+    assert.equal(creds.apiKey, "key-later");
+  }
+}
+
+// Agent key env: NUBIS_AGENT_KEY (nubis_ag_ prefix is the live token shape).
+{
+  const creds = resolveClientCredentials({
+    env: {
+      NUBIS_WORKSPACE_ID: "ws-agent",
+      NUBIS_AGENT_KEY: "nubis_ag_live-secret",
+    },
+    argv: [],
+  });
+  assert.equal(creds.workspaceId, "ws-agent");
+  assert.equal(creds.authKind, "agent_key");
+  if (creds.authKind === "agent_key") {
+    assert.equal(creds.agentKey, "nubis_ag_live-secret");
+  }
+}
+
+// --agent-key argv; do not overload --access-token.
+{
+  const creds = resolveClientCredentials({
+    env: { NUBIS_WORKSPACE_ID: "ws-agent-flag" },
+    argv: ["node", "build/index.js", "--agent-key", "nubis_ag_from-flag"],
+  });
+  assert.equal(creds.authKind, "agent_key");
+  if (creds.authKind === "agent_key") {
+    assert.equal(creds.agentKey, "nubis_ag_from-flag");
+  }
+}
+
+{
+  const creds = resolveClientCredentials({
+    env: {},
+    argv: [
+      "node",
+      "build/index.js",
+      "--workspaceID=ws-eq-agent",
+      "--agent-key=nubis_ag_eq",
+    ],
+  });
+  assert.equal(creds.workspaceId, "ws-eq-agent");
+  assert.equal(creds.authKind, "agent_key");
+}
+
+// Hard-error if both workspace API key and agent key are set.
+{
+  assert.throws(
+    () =>
+      resolveClientCredentials({
+        env: {
+          NUBIS_WORKSPACE_ID: "ws-both",
+          NUBIS_API_KEY: "human-key",
+          NUBIS_AGENT_KEY: "nubis_ag_agent-key",
+        },
+        argv: [],
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Cannot set both/);
+      assert.match(err.message, /NUBIS_API_KEY/);
+      assert.match(err.message, /NUBIS_AGENT_KEY/);
+      return true;
+    }
+  );
+}
+
+{
+  assert.throws(
+    () =>
+      resolveClientCredentials({
+        env: { NUBIS_WORKSPACE_ID: "ws-both", NUBIS_API_KEY: "human-key" },
+        argv: ["node", "build/index.js", "--agent-key", "nubis_ag_flag"],
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Cannot set both/);
+      return true;
+    }
+  );
+}
+
+{
+  assert.throws(
+    () =>
+      resolveClientCredentials({
+        env: {
+          NUBIS_WORKSPACE_ID: "ws-both",
+          NUBIS_ACCESS_TOKEN: "token-alias",
+          NUBIS_AGENT_KEY: "nubis_ag_agent-key",
+        },
+        argv: [],
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Cannot set both/);
+      return true;
+    }
+  );
+}
+
+// Agent mode still requires workspace UUID out of band.
+{
+  assert.throws(
+    () =>
+      resolveClientCredentials({
+        env: { NUBIS_AGENT_KEY: "nubis_ag_orphan" },
+        argv: [],
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /workspaceId is required/);
+      return true;
+    }
+  );
 }
 
 console.log("src/credentials.test.ts: ok");
+

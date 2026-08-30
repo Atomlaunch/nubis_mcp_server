@@ -1,111 +1,103 @@
 # Nubis MCP Server
 
-## What is MCP?
+MCP server for Nubis task management. stdio process: `src/index.ts` → `POST https://mcp-server.nubis.app/<endpoint>`.
 
-The Model Context Protocol (MCP) is a standardized interface that allows AI models to access external tools and data sources. This server implements the MCP specification to provide AI assistants with access to Nubis task management functionality.
-
-## Installation
+Do not wrap this package as WebMCP / `document.modelContext`.
 
 ```bash
-npx -y @lil2good/nubis-mcp-server@latest --workspaceID <your-workspace-id> --access-token <your-api-key>
+npx -y @lil2good/nubis-mcp-server@latest --workspaceID <workspace-uuid> --access-token <workspace-api-key>
 ```
 
-## Available Tools
+Workspace UUID is always required (out of band). Do not set both a workspace API key and an agent key.
 
-This MCP server provides the following tools:
+## Auth modes
 
-### `get_tasks`
-Retrieves a list of tasks for a workspace with optional filtering by board.
+### Human / workspace MCP key
 
-```
-Parameters:
-- limit: number (optional, default: 5)
-- board: 'bugs' | 'backlog' | 'priority' | 'in-progress' | 'reviewing' | 'completed' (optional)
-```
-
-### `get_task`
-Gets detailed information about a specific task by ID.
-
-```
-Parameters:
-- taskID: string (required)
-```
-
-### `get_task_images`
-Retrieves images associated with a specific task.
-
-```
-Parameters:
-- taskID: string (required)
-```
-
-### `work_on_task`
-Moves a task to the "in-progress" board and returns task details.
-
-```
-Parameters:
-- taskID: string (required)
-```
-
-### `explain_setup`
-Provides information about what needs to be done to implement a feature based on task details.
-
-```
-Parameters:
-- taskID: string (required)
-```
-
-### `move_task`
-Moves a task to a different board.
-
-```
-Parameters:
-- taskID: string (required)
-- board: 'backlog' | 'in-progress' | 'reviewing' | 'completed' (required)
-```
-
-### `delete_task`
-Deletes a single task in the authenticated workspace. Related comments, labels, blockers, commits, and assignments are removed with the task. Missing IDs are reported instead of failing. Never deletes across workspaces.
-
-```
-Parameters:
-- taskID: string (required) — UUID of the task to delete
-
-Returns:
-- deleted: { id, title, task_number, board } | null
-- missing: string[] — IDs not found in this workspace
-```
-
-### `delete_tasks`
-Deletes multiple tasks in the authenticated workspace. If some IDs are missing, those are reported and the rest of the batch still deletes. Never deletes across workspaces.
-
-```
-Parameters:
-- taskIDs: string[] (required) — UUIDs of the tasks to delete
-
-Returns:
-- deleted: { id, title, task_number, board }[]
-- missing: string[] — IDs not found in this workspace
-```
-
-## Configuration in AI Tools
-
-To use this MCP server with AI assistants that support MCP, add the following configuration:
+Settings → MCP. Env: `NUBIS_API_KEY` (aliases: `NUBIS_ACCESS_TOKEN`, `ACCESS_TOKEN`, argv `--access-token`).
 
 ```json
 "nubis": {
   "command": "npx",
-  "args": [
-    "-y",
-    "@lil2good/nubis-mcp-server@latest"
-  ],
+  "args": ["-y", "@lil2good/nubis-mcp-server@latest"],
   "env": {
-    "NUBIS_API_KEY": "<YOUR_API_KEY>",
-    "NUBIS_WORKSPACE_ID": "<YOUR_WORKSPACE_ID>"
+    "NUBIS_API_KEY": "<workspace-mcp-key>",
+    "NUBIS_WORKSPACE_ID": "<workspace-uuid>"
   }
 }
 ```
 
-## Security
+### Agent principal key
 
-This MCP server uses a secure middleware architecture that keeps your API credentials safe. All privileged operations are performed through a secure server, while the MCP interface remains lightweight and secure for public distribution.
+Minted agent (`nubis_ag_…`). Env: `NUBIS_AGENT_KEY` (argv `--agent-key`). Workspace UUID still required. The process exchanges the key via `POST /agent-session` (Edge `agent-token`) and caches a JWT in memory. Tool calls send `Authorization: Bearer <jwt>`, never the raw agent key, and never look the key up in `api_keys`.
+
+```json
+"nubis": {
+  "command": "npx",
+  "args": ["-y", "@lil2good/nubis-mcp-server@latest"],
+  "env": {
+    "NUBIS_AGENT_KEY": "nubis_ag_…",
+    "NUBIS_WORKSPACE_ID": "<workspace-uuid>"
+  }
+}
+```
+
+If both keys are set, the process hard-errors. If Edge `agent-token` is missing, agent mode fails with a 501 / `not_wired` error — it does not fall back to workspace `api_keys` + service role.
+
+`agent-token` is **middleware** (password grant, not generateLink / magic-link). Do not call it from the model.
+
+v1: an agent is already a workspace member after Settings **invite-agent**. Task tools then run as that agent JWT (`created_by` = agent uid). An agent key with no `pm_members` row for `NUBIS_WORKSPACE_ID` gets **403** on workspace tools. Rotate/revoke stay in Settings (human owner/admin). There is no `invite_human` tool.
+
+## Board keys
+
+Live keys: `inbox` | `priority` | `bugs` | `in-progress` | `reviewing` | `done` | `closed`.
+
+Aliases (mapped before filter/write): `backlog` → `inbox`, `completed` → `done`. Exact-match filters use the live key, so `backlog` lists inbox rows.
+
+## Tools
+
+Registered in `src/index.ts` (stdio). HTTP routes use the same names as path `/<endpoint>` except `get_task_details` → `POST /get_task`.
+
+### Tasks
+
+| Tool | Purpose |
+| --- | --- |
+| `get_boltz` | List project branches (boltz) |
+| `get_tasks` | List tasks (`limit`, `board`, `bolt_id`) |
+| `get_task_details` | Full task including subtasks and comments |
+| `get_task_context` | Saved implementation notes |
+| `add_context_to_task` | Append context text to a task |
+| `get_task_images` | Image URLs on a task |
+| `work_on_task` | Fetch details and refuse if blockers exist |
+| `move_task` | Move a task to a board |
+| `create_task` | Create a task (default board `inbox`) |
+| `update_task` | Patch task fields |
+| `delete_task` | Delete one task in this workspace |
+| `delete_tasks` | Delete many; missing IDs reported |
+| `add_comment` | Comment on a task |
+| `add_blocker` | Mark a task blocked by another |
+| `remove_blocker` | Remove a blocker |
+| `get_labels` | Workspace labels |
+| `add_label_to_task` | Attach a label |
+| `remove_label_from_task` | Detach a label |
+| `get_task_commits` | Commits linked to a task |
+| `link_commit_to_task` | Link a git commit |
+| `get_teams` | Workspace teams |
+| `get_team_members` | Members of a team |
+
+### Agent membership
+
+Require `NUBIS_AGENT_KEY` (agent session).
+
+| Tool | Who | Notes |
+| --- | --- | --- |
+| `list_agent_memberships` | Agent JWT | Own `pm_members` rows for `auth.uid()` |
+| `mint_agent` | Agent **admin** | New principal via Edge `invite-agent`, role **member** only. Plaintext key once; do not log. 501 until Edge is wired. Human owner/admin mint stays in Settings. |
+
+Rotate and revoke are Settings-only (human owner/admin).
+
+## HTTP middleware (operators)
+
+`server/` is the privileged process behind `mcp-server.nubis.app`. Workspace keys still use `api_keys`. Agent keys are prefix-detected (`nubis_ag_`) and never selected from `api_keys`. Agent writes use the session JWT, not the service role.
+
+Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and for agent mode `SUPABASE_ANON_KEY` plus PMTool Edge: `agent-token` (password grant), `invite-agent`. Missing Edge → HTTP 501 `not_wired`.

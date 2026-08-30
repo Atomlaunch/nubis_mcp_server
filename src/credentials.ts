@@ -4,6 +4,11 @@
  * Cursor/npx connectors use several env names, and the README documents
  * `--workspaceID` / `--access-token`. JSON.stringify drops undefined keys, so
  * a missing snapshot at import used to POST a body with no workspaceId.
+ *
+ * Two key types (do not collapse):
+ * - Workspace MCP key: NUBIS_API_KEY / --access-token (human Settings → MCP)
+ * - Agent principal key: NUBIS_AGENT_KEY / --agent-key (nubis_ag_…)
+ * Both set is a hard error so a human key cannot silently shadow an agent.
  */
 
 const WORKSPACE_ENV_VARS = [
@@ -18,10 +23,24 @@ const API_KEY_ENV_VARS = [
   "ACCESS_TOKEN",
 ] as const;
 
+const AGENT_KEY_ENV_VARS = ["NUBIS_AGENT_KEY"] as const;
+
 export type CredentialSources = {
   env?: NodeJS.ProcessEnv;
   argv?: readonly string[];
 };
+
+export type ClientCredentials =
+  | {
+      workspaceId: string;
+      authKind: "workspace_api_key";
+      apiKey: string;
+    }
+  | {
+      workspaceId: string;
+      authKind: "agent_key";
+      agentKey: string;
+    };
 
 function trimmed(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
@@ -57,7 +76,7 @@ export function argvFlag(flag: string, argv: readonly string[]): string {
 
 export function resolveClientCredentials(
   sources: CredentialSources = {}
-): { workspaceId: string; apiKey: string } {
+): ClientCredentials {
   const env = sources.env ?? process.env;
   const argv = sources.argv ?? process.argv;
 
@@ -65,17 +84,30 @@ export function resolveClientCredentials(
     argvFlag("--workspaceID", argv) || firstEnv(env, WORKSPACE_ENV_VARS);
   const apiKey =
     argvFlag("--access-token", argv) || firstEnv(env, API_KEY_ENV_VARS);
+  const agentKey =
+    argvFlag("--agent-key", argv) || firstEnv(env, AGENT_KEY_ENV_VARS);
 
   if (!workspaceId) {
     throw new Error(
       "workspaceId is required. Set NUBIS_WORKSPACE_ID, NUBIS_WORKSPACEID, or WORKSPACE_ID, or pass --workspaceID."
     );
   }
-  if (!apiKey) {
+
+  if (agentKey && apiKey) {
     throw new Error(
-      "apiKey is required. Set NUBIS_API_KEY, NUBIS_ACCESS_TOKEN, or ACCESS_TOKEN, or pass --access-token."
+      "Cannot set both a workspace API key (NUBIS_API_KEY / NUBIS_ACCESS_TOKEN / ACCESS_TOKEN / --access-token) and an agent key (NUBIS_AGENT_KEY / --agent-key). Use one."
     );
   }
 
-  return { workspaceId, apiKey };
+  if (agentKey) {
+    return { workspaceId, authKind: "agent_key", agentKey };
+  }
+
+  if (!apiKey) {
+    throw new Error(
+      "apiKey is required. Set NUBIS_API_KEY, NUBIS_ACCESS_TOKEN, or ACCESS_TOKEN, or pass --access-token for human MCP; or set NUBIS_AGENT_KEY / --agent-key for an agent principal. Do not set both."
+    );
+  }
+
+  return { workspaceId, authKind: "workspace_api_key", apiKey };
 }

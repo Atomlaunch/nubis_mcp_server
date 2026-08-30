@@ -1,0 +1,3 @@
+[mcp_servers.arc-mcp]
+url = "http://127.0.0.1:51936/mcp"
+enabled = true

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import type { Request } from "express";
 import {
+  agentKeyApiKeysLookupError,
   apiKeyFromRequest,
+  authKindFromSecret,
   credentialsFromRequest,
+  isAgentJwt,
+  isAgentKey,
+  isOwnerEquivalentRole,
+  redactSecrets,
   taskIDFromBody,
   taskIDsFromBody,
   workspaceIdFromRequest,
@@ -114,6 +120,79 @@ function assertOldHandlerWould400(body: unknown) {
   assert.equal(taskIDsFromBody({ workspaceId: "ws-1", apiKey: "key-1" }), undefined);
   assert.equal(taskIDsFromBody({ schema: { taskID: TASK_ID } }), undefined);
   assert.deepEqual(taskIDsFromBody({ taskIDs: [] }), []);
+}
+
+const AGENT_KEY = "nubis_ag_test-secret-do-not-log";
+const JWT =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZ2VudC11c2VyIn0.sig";
+
+assert.equal(isAgentKey(AGENT_KEY), true);
+assert.equal(isAgentKey("nubis_live_workspace"), false);
+assert.equal(isAgentJwt(JWT), true);
+assert.equal(isAgentJwt(AGENT_KEY), false);
+assert.equal(authKindFromSecret(AGENT_KEY), "agent_key");
+assert.equal(authKindFromSecret(JWT), "agent_jwt");
+assert.equal(authKindFromSecret("plain-workspace-key"), "workspace_api_key");
+
+{
+  const err = agentKeyApiKeysLookupError(AGENT_KEY);
+  assert.ok(err);
+  assert.match(err, /nubis_ag_/);
+  assert.match(err, /api_keys/);
+  assert.equal(agentKeyApiKeysLookupError("workspace-key"), null);
+}
+
+{
+  const req = fakeReq(
+    { workspaceId: "ws-1", apiKey: AGENT_KEY, schema: { board: "inbox" } }
+  );
+  const creds = credentialsFromRequest(req);
+  assert.equal(creds.authKind, "agent_key");
+  assert.equal(creds.apiKey, AGENT_KEY);
+}
+
+{
+  const req = fakeReq({ workspaceId: "ws-1" }, { authorization: `Bearer ${JWT}` });
+  const creds = credentialsFromRequest(req);
+  assert.equal(creds.authKind, "agent_jwt");
+  assert.equal(isAgentKey(creds.apiKey), false);
+}
+
+{
+  const req = fakeReq(
+    { workspaceId: "ws-1", apiKey: "workspace-key" },
+    { authorization: `Bearer ${AGENT_KEY}` }
+  );
+  const creds = credentialsFromRequest(req);
+  assert.equal(creds.authKind, "workspace_api_key", "body workspace key still wins");
+}
+
+assert.equal(isOwnerEquivalentRole("owner"), true);
+assert.equal(isOwnerEquivalentRole("admin"), true);
+assert.equal(isOwnerEquivalentRole("co-owner"), false);
+assert.equal(isOwnerEquivalentRole("member"), false);
+
+{
+  const redacted = redactSecrets({
+    workspaceId: "ws-1",
+    apiKey: AGENT_KEY,
+    schema: { message: "hello", nestedKey: AGENT_KEY },
+  }) as Record<string, unknown>;
+  assert.equal(redacted.workspaceId, "ws-1");
+  assert.equal(redacted.apiKey, "[redacted]");
+  const schema = redacted.schema as Record<string, unknown>;
+  assert.equal(schema.message, "hello");
+  assert.equal(schema.nestedKey, "[redacted]");
+  assert.equal(JSON.stringify(redacted).includes("nubis_ag_"), false);
+}
+
+{
+  const redacted = redactSecrets({
+    access_token: JWT,
+    Authorization: `Bearer ${JWT}`,
+  }) as Record<string, unknown>;
+  assert.equal(redacted.access_token, "[redacted]");
+  assert.equal(redacted.Authorization, "[redacted]");
 }
 
 console.log("request-auth tests passed");

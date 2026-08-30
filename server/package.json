@@ -7,7 +7,7 @@
     "dev": "npx tsx watch index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "test": "tsx request-auth.test.ts",
+    "test": "tsx request-auth.test.ts && tsx boards.test.ts",
     "postinstall": "npm run build"
   },
   "engines": {

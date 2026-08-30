@@ -8,6 +8,26 @@ export type DeleteTaskBody = {
   taskIDs?: unknown;
 };
 
+export type AuthKind = "workspace_api_key" | "agent_key" | "agent_jwt";
+
+export const AGENT_KEY_PREFIX = "nubis_ag_";
+
+const OWNER_EQUIVALENT_ROLES = new Set(["owner", "admin"]);
+
+const SECRET_FIELD_NAMES = new Set([
+  "apikey",
+  "api_key",
+  "agentkey",
+  "agent_key",
+  "accesstoken",
+  "access_token",
+  "refreshtoken",
+  "refresh_token",
+  "authorization",
+  "x-api-key",
+  "xapikey",
+]);
+
 function headerString(value: string | string[] | undefined): string {
   const raw = Array.isArray(value) ? value[0] : value;
   return typeof raw === "string" ? raw.trim() : "";
@@ -23,6 +43,40 @@ function schemaObject(schema: unknown): Record<string, unknown> | null {
     return null;
   }
   return schema as Record<string, unknown>;
+}
+
+export function isAgentKey(value: string): boolean {
+  return value.startsWith(AGENT_KEY_PREFIX);
+}
+
+/** Compact JWT detection: three segments, header starts with eyJ. */
+export function isAgentJwt(value: string): boolean {
+  const parts = value.split(".");
+  return parts.length === 3 && parts[0].startsWith("eyJ");
+}
+
+export function authKindFromSecret(secret: string): AuthKind {
+  if (isAgentKey(secret)) return "agent_key";
+  if (isAgentJwt(secret)) return "agent_jwt";
+  return "workspace_api_key";
+}
+
+/**
+ * Owner-equivalent workspace ops for the workspace-key path.
+ * v1 has no co-owner role. Billing owner stays `owner` on pm_projects.owner_id.
+ */
+export function isOwnerEquivalentRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return OWNER_EQUIVALENT_ROLES.has(role);
+}
+
+/**
+ * Agent keys must never be looked up in `api_keys`.
+ * Returns an error message when the secret is an agent principal key.
+ */
+export function agentKeyApiKeysLookupError(apiKey: string): string | null {
+  if (!isAgentKey(apiKey)) return null;
+  return "Agent keys (nubis_ag_) are not workspace API keys and must not be looked up in api_keys. Exchange via POST /agent-session.";
 }
 
 /**
@@ -86,11 +140,39 @@ export function credentialsFromRequest(req: Request): {
   workspaceId: string;
   apiKey: string;
   schema: any;
+  authKind: AuthKind | null;
 } {
   const body = (req.body ?? {}) as DeleteTaskBody;
+  const apiKey = apiKeyFromRequest(req, body);
   return {
     workspaceId: workspaceIdFromRequest(body),
-    apiKey: apiKeyFromRequest(req, body),
+    apiKey,
     schema: body.schema,
+    authKind: apiKey ? authKindFromSecret(apiKey) : null,
   };
+}
+
+function redactString(value: string): string {
+  if (isAgentKey(value) || isAgentJwt(value)) return "[redacted]";
+  return value;
+}
+
+/**
+ * Strip API keys, agent keys, and JWTs before console.log of request bodies.
+ */
+export function redactSecrets(value: unknown): unknown {
+  if (typeof value === "string") return redactString(value);
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (!value || typeof value !== "object") return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (SECRET_FIELD_NAMES.has(key.toLowerCase()) || SECRET_FIELD_NAMES.has(normalized)) {
+      out[key] = nested ? "[redacted]" : nested;
+      continue;
+    }
+    out[key] = redactSecrets(nested);
+  }
+  return out;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@lil2good/nubis-mcp-server",
-  "version": "1.0.63",
+  "version": "1.0.64",
   "description": "MCP server for Nubis task management",
   "main": "build/index.js",
   "bin": {
@@ -16,7 +16,7 @@
     "mcp:build": "tsc",
     "mcp:start": "node build/index.js",
     "mcp:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "mcp:test": "npx --yes tsx src/credentials.test.ts"
+    "mcp:test": "npx --yes tsx src/credentials.test.ts && npx --yes tsx src/boards.test.ts"
   },
   "author": "lil2good",
   "license": "MIT",
