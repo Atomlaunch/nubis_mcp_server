@@ -24,6 +24,11 @@ import {
   edgeNotWiredBody,
   sessionFromAgentTokenPayload,
 } from "./agent-edge.js";
+import {
+  bulkTaskNumbers,
+  buildTaskUpdatePatch,
+  isMissingRow,
+} from "./task-patches.js";
 
 dotenv.config();
 
@@ -46,18 +51,18 @@ export const supabase: SupabaseClient = createClient(
 
 const app = express();
 
-app.set("trust proxy", true);
+app.set("trust proxy", 1);
 app.use(express.json());
 
 // Rate limit middleware
 const apiLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 5000, // limit each IP to 50 requests per windowMs
+  max: 5000, // limit each IP to 5000 requests per window
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   message: {
     error:
-      "Too many requests, please try again later. (500 requests per 5 minutes)",
+      "Too many requests, please try again later. (5000 requests per 5 minutes)",
   },
 });
 
@@ -97,14 +102,16 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: "workspaceId is required",
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
     if (!apiKey) {
       return {
         success: false,
         error: "apiKey is required",
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
     const agentKeyError = agentKeyApiKeysLookupError(apiKey);
@@ -112,14 +119,16 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: agentKeyError,
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
     if (authKindFromSecret(apiKey) !== "workspace_api_key") {
       return {
         success: false,
         error: "checkUserApiKey is workspace-key-only. Exchange agent keys via POST /agent-session.",
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
     // Validate apiKey in api_key table (workspace MCP keys only — never nubis_ag_)
@@ -132,7 +141,8 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: "Invalid or unauthorized apiKey",
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
 
@@ -149,7 +159,8 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: `User does not have access to workspace ${workspaceId}`,
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
 
@@ -169,7 +180,8 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
         return {
           success: false,
           error: "User does not have access to resource api_calls",
-          api_usage: null
+          api_usage: null,
+          userId: null,
         };
       }
     }
@@ -202,6 +214,7 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: true,
         error: null,
+        userId: user_id,
         api_usage: {
           remaining_calls: "unlimited",
           total_limit: "unlimited",
@@ -210,7 +223,8 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       };
     }
 
-    // For free plans, check and enforce API usage limits
+    // For free plans, check and enforce API usage limits.
+    // Compare-and-swap so concurrent requests cannot both decrement the same remaining_calls value.
     const { data: apiUsageData, error: apiUsageError } = await supabase
       .from("api_usage")
       .select("*")
@@ -220,59 +234,91 @@ export async function checkUserApiKey(apiKey: string, workspaceId: string) {
       return {
         success: false,
         error: `API usage limit not found for workspace ${workspaceId}`,
-        api_usage: null
+        api_usage: null,
+        userId: null,
       };
     }
 
-    if (apiUsageData.remaining_calls <= 0) {
-      return {
-        success: false,
-        error: "API usage limit exceeded",
-        api_usage: {
-          remaining_calls: apiUsageData.remaining_calls,
-          total_limit: apiUsageData.total_limit,
-          plan: planName
-        }
-      };
-    }
-
-    // Update API Usage - 1
-    const { error: updateError } = await supabase
-      .from("api_usage")
-      .update({ remaining_calls: apiUsageData.remaining_calls - 1 })
-      .eq("project_id", workspaceId);
-
-    if (updateError) {
-      return {
-        success: false,
-        error: "Failed to update API usage",
-        api_usage: {
-          remaining_calls: apiUsageData.remaining_calls,
-          total_limit: apiUsageData.total_limit,
-          plan: planName
-        }
-      };
-    }
-    console.log(
-      `API usage updated for workspace ${workspaceId} on plan "${planName}", Total Calls: ${apiUsageData.total_limit}, Remaining Calls: ${apiUsageData.remaining_calls - 1}`
-    );
-
-    // Return if user has access to workspace
-    return {
-      success: true,
-      error: null,
-      api_usage: {
-        remaining_calls: apiUsageData.remaining_calls - 1,
-        total_limit: apiUsageData.total_limit,
-        plan: planName
+    const totalLimit = apiUsageData.total_limit;
+    let remaining = apiUsageData.remaining_calls;
+    const maxAttempts = 5;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (remaining <= 0) {
+        return {
+          success: false,
+          error: "API usage limit exceeded",
+          api_usage: {
+            remaining_calls: remaining,
+            total_limit: totalLimit,
+            plan: planName
+          },
+          userId: null,
+        };
       }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("api_usage")
+        .update({ remaining_calls: remaining - 1 })
+        .eq("project_id", workspaceId)
+        .eq("remaining_calls", remaining)
+        .gt("remaining_calls", 0)
+        .select("remaining_calls, total_limit")
+        .maybeSingle();
+
+      if (updateError) {
+        return {
+          success: false,
+          error: "Failed to update API usage",
+          api_usage: {
+            remaining_calls: remaining,
+            total_limit: totalLimit,
+            plan: planName
+          },
+          userId: null,
+        };
+      }
+
+      if (updated) {
+        console.log(
+          `API usage updated for workspace ${workspaceId} on plan "${planName}", Total Calls: ${updated.total_limit}, Remaining Calls: ${updated.remaining_calls}`
+        );
+        return {
+          success: true,
+          error: null,
+          userId: user_id,
+          api_usage: {
+            remaining_calls: updated.remaining_calls,
+            total_limit: updated.total_limit,
+            plan: planName
+          }
+        };
+      }
+
+      const { data: latest } = await supabase
+        .from("api_usage")
+        .select("remaining_calls, total_limit")
+        .eq("project_id", workspaceId)
+        .single();
+      remaining = latest?.remaining_calls ?? 0;
+    }
+
+    return {
+      success: false,
+      error: "Failed to update API usage",
+      api_usage: {
+        remaining_calls: remaining,
+        total_limit: totalLimit,
+        plan: planName
+      },
+      userId: null,
     };
   } catch (error) {
     console.error(error);
     return {
       success: false,
       error: "Failed to check user API key",
-      api_usage: null
+      api_usage: null,
+      userId: null,
     };
   }
 }
@@ -296,7 +342,9 @@ export async function getUserProfile(apiKey: string) {
     return { data: user_id, error: null };
   } catch (error) {
     console.error(error);
-    return { data: null, error: null };
+    const message =
+      error instanceof Error ? error.message : "Failed to get user profile";
+    return { data: null, error: message };
   }
 }
 
@@ -418,13 +466,26 @@ export async function authorizeMcpRequest(
       return failAuth(401, { error: auth.error, api_usage: auth.api_usage });
     }
     const profile = await getUserProfile(apiKey);
+    const userId = auth.userId || profile.data;
+    if (profile.error && !userId) {
+      return failAuth(401, {
+        error: profile.error,
+        api_usage: auth.api_usage,
+      });
+    }
+    if (!userId) {
+      return failAuth(401, {
+        error: "Unauthorized",
+        api_usage: auth.api_usage,
+      });
+    }
     return {
       ok: true,
       authKind,
       workspaceId,
       schema,
       api_usage: auth.api_usage,
-      userId: profile.data,
+      userId,
       role: null,
       db: supabase,
       accessToken: null,
@@ -682,6 +743,15 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     .eq("project_id", workspaceId)
     .single();
 
+  if (taskError || !data) {
+    const status = isMissingRow(taskError) ? 404 : 500;
+    res.status(status).json({
+      error: isMissingRow(taskError) ? "Task not found" : taskError?.message || "Task not found",
+      api_usage,
+    });
+    return;
+  }
+
   // Get SubTasks
   const { data: subTasks, error: subTasksError } = await db
     .from("pm_tasks")
@@ -690,7 +760,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     )
     .order("sort_order", { ascending: false })
     .eq("project_id", workspaceId)
-    .eq("parent_task_id", data?.id);
+    .eq("parent_task_id", data.id);
 
   if (subTasksError) {
     console.error({ subTasksError });
@@ -711,12 +781,8 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  data.subtasks = subTasks ? [subTasks] : [];
-  data.comments = comments ? [comments] : [];
-  if (taskError) {
-    res.status(500).json({ error: taskError.message, api_usage });
-    return;
-  }
+  data.subtasks = subTasks || [];
+  data.comments = comments || [];
   res.json({ data, api_usage });
 });
 
@@ -791,7 +857,14 @@ app.post(
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId)
       .single();
-    if (taskError) throw new Error(taskError.message);
+    if (taskError || !data) {
+      const status = isMissingRow(taskError) ? 404 : 500;
+      res.status(status).json({
+        error: isMissingRow(taskError) ? "Task not found" : taskError?.message || "Task not found",
+        api_usage,
+      });
+      return;
+    }
 
     res.json({ data, api_usage });
   }
@@ -816,7 +889,14 @@ app.post(
       .eq("id", schema?.taskID)
       .eq("project_id", workspaceId)
       .single();
-    if (taskError) throw new Error(taskError.message);
+    if (taskError || !data) {
+      const status = isMissingRow(taskError) ? 404 : 500;
+      res.status(status).json({
+        error: isMissingRow(taskError) ? "Task not found" : taskError?.message || "Task not found",
+        api_usage,
+      });
+      return;
+    }
 
     res.json({ data, api_usage });
   }
@@ -852,7 +932,14 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .single();
-  if (taskError) throw new Error(taskError.message);
+  if (taskError || !data) {
+    const status = isMissingRow(taskError) ? 404 : 500;
+    res.status(status).json({
+      error: isMissingRow(taskError) ? "Task not found" : taskError?.message || "Task not found",
+      api_usage,
+    });
+    return;
+  }
 
   res.json({ data, api_usage });
 });
@@ -939,27 +1026,28 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .single();
-  if (taskError) {
-    res.status(500).json({ error: taskError.message, api_usage });
+  if (taskError || !task) {
+    const status = isMissingRow(taskError) ? 404 : 500;
+    res.status(status).json({
+      error: isMissingRow(taskError) ? "Task not found" : taskError?.message || "Task not found",
+      api_usage,
+    });
     return;
   }
 
-  const board = schema?.board
-    ? toLiveBoardStatusKey(String(schema.board))
-    : task?.board || "inbox";
+  const patch = buildTaskUpdatePatch(schema);
+  if (schema?.board) {
+    patch.board = toLiveBoardStatusKey(String(schema.board));
+  }
+
+  if (Object.keys(patch).length === 0) {
+    res.json({ data: task, api_usage });
+    return;
+  }
 
   const { data, error: updateError } = await db
     .from("pm_tasks")
-    .update({
-      title: schema?.title,
-      description: schema?.description,
-      board,
-      branch_id: schema?.bolt_id || task?.branch_id || null,
-      parent_task_id: schema?.parent_task_id || task?.parent_task_id || null,
-      github_item_type: schema?.github_item_type || task?.github_item_type || null,
-      github_file_path: schema?.github_file_path || task?.github_file_path || null,
-      github_repo_name: schema?.github_repo_name || task?.github_repo_name || null,
-    })
+    .update(patch)
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId)
     .select("*")
@@ -1070,10 +1158,22 @@ app.post(
       .limit(1)
       .single();
 
+    const tasks = Array.isArray(schema?.tasks) ? schema.tasks : [];
+    if (tasks.length === 0) {
+      res.status(400).json({ error: "tasks array is required", api_usage });
+      return;
+    }
+
+    const numbers = bulkTaskNumbers(
+      maxTaskNumber?.task_number || 0,
+      maxSortOrder?.sort_order || 0,
+      tasks.length
+    );
+
     const { data, error: insertError } = await db
       .from("pm_tasks")
       .insert(
-        schema?.tasks.map((task: any) => ({
+        tasks.map((task: any, i: number) => ({
           title: task.title,
           description: task.description,
           board: task.board
@@ -1081,8 +1181,8 @@ app.post(
             : "inbox",
           parent_task_id: task.parent_task_id || null,
           project_id: workspaceId,
-          sort_order: (maxSortOrder?.sort_order || 0) + 1000,
-          task_number: (maxTaskNumber?.task_number || 0) + 1,
+          sort_order: numbers[i].sort_order,
+          task_number: numbers[i].task_number,
           created_by: userId,
         }))
       )

@@ -351,11 +351,11 @@ server.tool(
       content: [
         {
           type: "text",
-          text: JSON.stringify({ taskID, context }),
+          text: JSON.stringify(json.data),
         },
         {
           type: "text",
-          text: `API Usage: ${JSON.stringify({ taskID, context })}`,
+          text: `API Usage: ${JSON.stringify(json.api_usage)}`,
         }
       ],
     };
@@ -433,17 +433,14 @@ server.tool(
       content: [
         {
           type: "text",
-          text: `You are assisting with task management in Nubis. Your task is to work on the user's requested task based on the following details:\n\n**Task Instruction**: Process and update the task with the provided information.\n\n**Task ID**: ${taskID}\n\n**Task Details**: \n      ${JSON.stringify(json.data, null, 2).replace(/"/g, '').replace(/:/g, ': ').replace(/},/g, ',\n')}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`,
+          text: `You are assisting with task management in Nubis. Your task is to work on the user's requested task based on the following details:\n\n**Task Instruction**: Process and update the task with the provided information.\n\n**Task ID**: ${taskID}\n\n**Task Details**: \n      ${JSON.stringify(json.data, null, 2)}\n      \n      Please analyze the details, perform the requested action (e.g., update description, add subtask), and return a response indicating the action taken.`,
         },
         {
           type: "text",
-          user: "NUBIS",
           text: `Prompt user to move this task to 'in-progress' if it is not already in progress.`,
         },
-        
         {
           type: "text",
-          user: "NUBIS",
           text: `API Usage: ${JSON.stringify(json.api_usage)}`,
         }
       ],
@@ -701,7 +698,7 @@ server.tool(
 // Add Blocker -> Mark a task as blocked by another
 server.tool(
   "add_blocker",
-  "Mark a task as blocked by another task. The blocked task cannot be worked on until the blocker is resolved (moved to completed).",
+  "Mark a task as blocked by another task. The blocked task cannot be worked on until the blocker is resolved (moved to done).",
   {
     taskID: z.string().describe("UUID of the task being blocked"),
     blocker_task_id: z.string().describe("UUID of the blocking task")
