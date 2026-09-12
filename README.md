@@ -101,3 +101,18 @@ Rotate and revoke are Settings-only (human owner/admin).
 `server/` is the privileged process behind `mcp-server.nubis.app`. Workspace keys still use `api_keys`. Agent keys are prefix-detected (`nubis_ag_`) and never selected from `api_keys`. Agent writes use the session JWT, not the service role.
 
 Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and for agent mode `SUPABASE_ANON_KEY` plus PMTool Edge: `agent-token` (password grant), `invite-agent`. Missing Edge → HTTP 501 `not_wired`.
+
+## Error monitoring (Sentry)
+
+The HTTP process (`server/`) initializes `@sentry/node` only when `SENTRY_DSN` is set. There is no DSN in the repo. The stdio MCP client (`src/`) does not send to Sentry.
+
+Set these on **Nubis: MCP Server** (Railway), not in git:
+
+| Env var | Required | What it does |
+| --- | --- | --- |
+| `SENTRY_DSN` | Yes, to enable | Sentry project DSN. SDK no-ops if empty. |
+| `SENTRY_ENVIRONMENT` | No | Event environment. Falls back to `RAILWAY_ENVIRONMENT_NAME`, then `NODE_ENV`. |
+| `SENTRY_TRACES_SAMPLE_RATE` | No | Trace sample rate 0–1. Default `0`. |
+| `SENTRY_RELEASE` | No | Release name. |
+
+Privacy: `sendDefaultPii` is off. Request bodies, cookies, `Authorization` / `x-api-key`, and Sentry `user` are stripped before send. Secrets in extras go through the same redaction as request logs.

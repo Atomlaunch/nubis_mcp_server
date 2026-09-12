@@ -7,13 +7,14 @@
     "dev": "npx tsx watch index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "test": "tsx request-auth.test.ts && tsx boards.test.ts",
+    "test": "tsx request-auth.test.ts && tsx boards.test.ts && tsx sentry.test.ts",
     "postinstall": "npm run build"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@sentry/node": "^10.74.0",
     "@supabase/supabase-js": "^2.39.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",

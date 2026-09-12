@@ -2,6 +2,11 @@ import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import rateLimit from "express-rate-limit";
+import {
+  initSentry,
+  installExpressAsyncErrorForwarding,
+  sentryErrorHandler,
+} from "./sentry.js";
 
 
 
@@ -26,6 +31,7 @@ import {
 } from "./agent-edge.js";
 
 dotenv.config();
+initSentry();
 
 const SUPABASE_URL: string = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY: string =
@@ -45,6 +51,7 @@ export const supabase: SupabaseClient = createClient(
 );
 
 const app = express();
+installExpressAsyncErrorForwarding(app);
 
 app.set("trust proxy", true);
 app.use(express.json());
@@ -1555,6 +1562,8 @@ app.post("/mint_agent", async (req: Request, res: Response): Promise<void> => {
     api_usage: auth.api_usage,
   });
 });
+
+app.use(sentryErrorHandler());
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
