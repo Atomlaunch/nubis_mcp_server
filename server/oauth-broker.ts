@@ -6,6 +6,7 @@ import { BrokerStore, type UpstreamSession } from "./broker-store.js";
 import type { BrokerIdentity, LoginAttempt } from "./broker-identity.js";
 import { MCP_SCOPES } from "./remote-policy.js";
 import { RemoteAuthError } from "./remote-auth.js";
+import { nativeDcrClientMetadata } from "./dcr-native.js";
 import { validatePublicUrl, type RemoteMcpConfig } from "./remote-mcp.js";
 
 export type BrokerOptions = {
@@ -85,6 +86,7 @@ export async function createOAuthBroker(options: BrokerOptions) {
     scopes: ["openid", "offline_access", ...MCP_SCOPES],
     subjectTypes: ["public"],
     clientAuthMethods: ["none"],
+    extraClientMetadata: nativeDcrClientMetadata,
     clientDefaults: {
       token_endpoint_auth_method: "none",
       response_types: ["code"],
