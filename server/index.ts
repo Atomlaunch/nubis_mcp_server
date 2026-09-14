@@ -1,3 +1,7 @@
+import { createRemoteDispatcher, remoteRequestAuth } from "./remote-dispatch.js";
+import { remoteMcpConfig } from "./remote-config.js";
+import { registerRemoteMcp } from "./remote-mcp.js";
+import { resolveRouting, projectInput, type Workflow } from "./workflows.js";
 import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
@@ -12,12 +16,15 @@ import {
   authKindFromSecret,
   credentialsFromRequest,
   isOwnerEquivalentRole,
+  isOAuthToken,
   redactSecrets,
   taskIDFromBody,
   taskIDsFromBody,
   type AuthKind,
 } from "./request-auth.js";
 import { toLiveBoardStatusKey } from "./boards.js";
+import { insertWorkspaceTask } from "./task-create.js";
+import { registerConsentUi } from "./consent-ui.js";
 import {
   agentModeConfigBody,
   callEdgeFunction,
@@ -37,23 +44,29 @@ const SUPABASE_SERVICE_ROLE_KEY: string =
   process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY: string = process.env.SUPABASE_ANON_KEY || "";
 const PORT: number = Number(process.env.PORT) || 4000;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error(
-    "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment"
-  );
+const remoteOnly = process.env.NUBIS_REMOTE_MCP_ONLY === "true";
+const middlewareKey = remoteOnly ? SUPABASE_ANON_KEY : SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL || !middlewareKey) {
+  throw new Error("Missing Supabase URL or authentication key for the selected middleware mode");
 }
 
-export const supabase: SupabaseClient = createClient(
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+// A dedicated broker instance neither needs nor uses a service-role credential.
+export const supabase: SupabaseClient = createClient(SUPABASE_URL, middlewareKey);
 
 const app = express();
+registerConsentUi(app, process.env.NUBIS_CONSENT_UI_DIR, SUPABASE_URL);
+if (remoteOnly) {
+  app.use((req, res, next) => {
+    const allowed = req.path === "/health" || req.path === "/mcp"
+      || ["/oauth", "/connect", "/connections", "/.well-known"].some(
+        prefix => req.path === prefix || req.path.startsWith(`${prefix}/`),
+      );
+    if (!allowed) { res.status(404).end(); return; }
+    next();
+  });
+}
 
 app.set("trust proxy", 1);
-app.use(express.json());
-
 // Rate limit middleware
 const apiLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -68,6 +81,13 @@ const apiLimiter = rateLimit({
 
 // Apply rate limiter to all routes
 app.use(apiLimiter);
+
+export const remoteDispatcher = createRemoteDispatcher(supabaseForUserJwt);
+const broker = await remoteMcpConfig(process.env, remoteDispatcher.execute);
+if (broker) broker.mount(app);
+// oidc-provider must parse its own raw protocol requests before this middleware.
+app.use(express.json({limit: "100kb"}));
+if (broker) registerRemoteMcp(app, broker.remote);
 
 const agentSessionLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -85,6 +105,9 @@ const agentSessionLimiter = rateLimit({
 app.get("/health", (_req: Request, res: Response): void => {
   res.json({ status: "ok" });
 });
+
+// No fallthrough into legacy handlers or logging, including unknown OAuth URLs.
+if (remoteOnly) app.use((_req, res) => { res.status(404).end(); });
 
 // Log Request — never print raw apiKey / nubis_ag_ / JWTs.
 app.use((req, _res, next) => {
@@ -370,7 +393,7 @@ function failAuth(status: number, body: Record<string, unknown>): McpAuthFail {
   return { ok: false, status, body };
 }
 
-function supabaseForAgentJwt(accessToken: string): SupabaseClient {
+function supabaseForUserJwt(accessToken: string): SupabaseClient {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { persistSession: false, autoRefreshToken: false },
@@ -440,10 +463,16 @@ export async function authorizeMcpRequest(
     allowMissingWorkspace?: boolean;
   } = {}
 ): Promise<McpAuthOk | McpAuthFail> {
+  const trusted = remoteRequestAuth(req);
+  if (trusted) {
+    if (options.agentOnly || options.membership === "admin") return failAuth(403, {error: "Human OAuth connections cannot use agent administration"});
+    return trusted;
+  }
   const membership = options.membership ?? "required";
   const creds = credentialsFromRequest(req);
   const { workspaceId, apiKey, schema, authKind } = creds;
 
+  if (isOAuthToken(apiKey)) return failAuth(403, {error: "OAuth connections must use the /mcp endpoint"});
   if (!apiKey) {
     return failAuth(401, { error: "apiKey is required", api_usage: null });
   }
@@ -509,7 +538,16 @@ export async function authorizeMcpRequest(
   const verified = await userIdFromAgentJwt(accessToken);
   if ("status" in verified) return verified;
   const userId = verified.userId;
-  const db = supabaseForAgentJwt(accessToken);
+  const db = supabaseForUserJwt(accessToken);
+  // Auth may still accept a JWT after its agent key is revoked or rotated.
+  // Read policies do not all enforce this gate, so check before any legacy access.
+  const { data: sessionAllowed, error: sessionError } = await db.rpc("agent_jwt_allowed");
+  if (sessionError || sessionAllowed !== true) {
+    return failAuth(403, {
+      error: "Agent session is revoked, rotated, or could not be verified",
+      code: "AGENT_SESSION_NOT_ALLOWED",
+    });
+  }
   const agentUsage = {
     remaining_calls: "unlimited",
     total_limit: "unlimited",
@@ -555,6 +593,9 @@ export async function authorizeMcpRequest(
     });
   }
 
+  if (options.agentOnly && member.member_kind !== "agent") {
+    return failAuth(403, {error: "This endpoint requires an agent principal"});
+  }
   if (membership === "admin" && member.role !== "admin") {
     return failAuth(403, {
       error: "This tool requires an agent admin. Agent members cannot mint other agents. Rotate/revoke stay in Settings (human owner/admin).",
@@ -666,7 +707,54 @@ export async function deleteWorkspaceTasks(
 /**
  * Get all Boltz
  */
-app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
+async function workflowCatalog(db: SupabaseClient, workspaceId: string): Promise<Workflow[]> {
+  const {data, error} = await db.from("pm_task_boards")
+    .select("*, project:pm_branches!inner(project_id), columns:pm_task_board_columns(*)")
+    .eq("project.project_id", workspaceId).order("position");
+  if (error) throw error;
+  return (data ?? []).map((board: any) => ({...board, columns: [...board.columns].sort((a: any,b: any) => a.position-b.position)}));
+}
+
+async function routingForRequest(db: SupabaseClient, workspaceId: string, schema: any, res: Response, current?: any) {
+  try {
+    const input = schema ?? {};
+    for (const key of ["board_id", "board_column_id"]) {
+      if (input[key] !== undefined && (typeof input[key] !== "string" || !TASK_ID_UUID_RE.test(input[key]))) throw new Error(`${key} must be a UUID`);
+    }
+    const project = projectInput(input);
+    if (project) {
+      const {data, error} = await db.from("pm_branches").select("id").eq("id",project).eq("project_id",workspaceId).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("Project not found in this workspace");
+    }
+    const routing = resolveRouting(input, await workflowCatalog(db, workspaceId), current);
+    if (input.assignee_id !== undefined) {
+      if (input.assignee_id !== null) {
+        if (typeof input.assignee_id !== "string" || !TASK_ID_UUID_RE.test(input.assignee_id)) throw new Error("assignee_id must be a UUID or null");
+        const {data: member, error} = await db.from("pm_members").select("id").eq("project_id",workspaceId).eq("user_id",input.assignee_id).maybeSingle();
+        if (error) throw error;
+        if (!member) throw new Error("Assignee is not a workspace member");
+      }
+      return {...routing, _assignee: input.assignee_id};
+    }
+    return routing;
+  } catch (error) {
+    res.status(400).json({error: error instanceof Error ? error.message : "Unable to resolve workflow destination"});
+    return null;
+  }
+}
+
+remoteDispatcher.register(app, "/get_task_boards", async (req: Request, res: Response): Promise<void> => {
+  const auth = await authorizeMcpRequest(req);
+  if (!auth.ok) { res.status(auth.status).json(auth.body); return; }
+  try {
+    const project = projectInput(auth.schema ?? {});
+    const catalog = await workflowCatalog(auth.db, auth.workspaceId);
+    res.json({data: project ? catalog.filter(board => board.project_id === project) : catalog, api_usage: auth.api_usage});
+  } catch (error) { res.status(400).json({error: error instanceof Error ? error.message : "Unable to load workflows"}); }
+});
+
+remoteDispatcher.register(app, ["/get_boltz", "/get_projects"], async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -688,7 +776,7 @@ app.post("/get_boltz", async (req: Request, res: Response): Promise<void> => {
 /**
  * Return tasks for a workspace
  */
-app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/get_tasks", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -704,9 +792,13 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
     .order("created_at", { ascending: false })
     .eq("project_id", workspaceId);
 
-  if (schema?.bolt_id) {
-    query = query.eq("branch_id", schema.bolt_id);
-  }
+  try {
+    const project = projectInput(schema ?? {});
+    if (project) query = query.eq("branch_id", project);
+    if (project === null) query = query.is("branch_id", null);
+  } catch (error) { res.status(400).json({error: (error as Error).message}); return; }
+  if (schema?.board_id) query = query.eq("board_id", schema.board_id);
+  if (schema?.board_column_id) query = query.eq("board_column_id", schema.board_column_id);
 
   if (schema?.board) {
     query = query.in("board", [toLiveBoardStatusKey(String(schema.board))]);
@@ -728,7 +820,7 @@ app.post("/get_tasks", async (req: Request, res: Response): Promise<void> => {
 /**
  * Return task by ID
  */
-app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/get_task", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -756,7 +848,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
   const { data: subTasks, error: subTasksError } = await db
     .from("pm_tasks")
     .select(
-      "id, task_number, title, description, board, images, branch_id, github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)"
+      "id, task_number, title, description, board, board_id, board_column_id, images, branch_id, github_item_type, github_file_path, github_repo_name, pm_task_blockers!pm_task_blockers_task_id_fkey(id, blocker_task_id, task_id)"
     )
     .order("sort_order", { ascending: false })
     .eq("project_id", workspaceId)
@@ -789,7 +881,7 @@ app.post("/get_task", async (req: Request, res: Response): Promise<void> => {
 /** 
  * Get Task Context
  */
-app.post("/get_task_context", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/get_task_context", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -814,7 +906,7 @@ app.post("/get_task_context", async (req: Request, res: Response): Promise<void>
 /**
  * Return task images by ID
  */
-app.post(
+remoteDispatcher.register(app,
   "/get_task_images",
   async (req: Request, res: Response): Promise<void> => {
     const auth = await authorizeMcpRequest(req);
@@ -841,7 +933,7 @@ app.post(
 /**
  * Return work on task
  */
-app.post(
+remoteDispatcher.register(app,
   "/work_on_task",
   async (req: Request, res: Response): Promise<void> => {
     const auth = await authorizeMcpRequest(req);
@@ -905,20 +997,22 @@ app.post(
 /**
  * Return move_task
  */
-app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/move_task", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
     return;
   }
   const { workspaceId, schema, api_usage, db } = auth;
-  const liveBoard = schema?.board
-    ? toLiveBoardStatusKey(String(schema.board))
-    : schema?.board;
+  const {data: current, error: readError} = await db.from("pm_tasks").select("*").eq("id",schema?.taskID).eq("project_id",workspaceId).maybeSingle();
+  if (readError || !current) { res.status(readError ? 500 : 404).json({error: "Task unavailable"}); return; }
+  if (!schema?.board && !schema?.board_id && !schema?.board_column_id) { res.status(400).json({error: "Choose a board or column"}); return; }
+  const routing = await routingForRequest(db, workspaceId, schema, res, current);
+  if (!routing) return;
 
   const { error: updateError } = await db
     .from("pm_tasks")
-    .update({ board: liveBoard })
+    .update(routing)
     .eq("id", schema?.taskID)
     .eq("project_id", workspaceId);
   if (updateError) {
@@ -947,7 +1041,7 @@ app.post("/move_task", async (req: Request, res: Response): Promise<void> => {
 /**
  *  Return Create Task
  */
-app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/create_task", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -959,44 +1053,19 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const { data: maxTaskNumber } = await db
-    .from("pm_tasks")
-    .select("task_number")
-    .eq("project_id", workspaceId)
-    .order("task_number", { ascending: false })
-    .limit(1)
-    .single();
+  const routing = await routingForRequest(db, workspaceId, schema, res);
+  if (!routing) return;
 
-  const { data: maxSortOrder } = await db
-    .from("pm_tasks")
-    .select("sort_order")
-    .eq("project_id", workspaceId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .single();
-
-  const board = schema?.board
-    ? toLiveBoardStatusKey(String(schema.board))
-    : "inbox";
-
-  const { data, error: insertError } = await db
-    .from("pm_tasks")
-    .insert({
-      title: schema?.title,
-      description: schema?.description,
-      board,
-      parent_task_id: schema?.parent_task_id || null,
-      project_id: workspaceId,
-      sort_order: (maxSortOrder?.sort_order || 0) + 1000,
-      task_number: (maxTaskNumber?.task_number || 0) + 1,
-      branch_id: schema?.bolt_id || null,
-      github_item_type: schema?.github_item_type || null,
-      github_file_path: schema?.github_file_path || null,
-      github_repo_name: schema?.github_repo_name || null,
-      created_by: userId,
-    })
-    .select("*")
-    .single();
+  const { data, error: insertError } = await insertWorkspaceTask(db, workspaceId, {
+    title: schema?.title,
+    description: schema?.description,
+    ...routing,
+    parent_task_id: schema?.parent_task_id || null,
+    github_item_type: schema?.github_item_type || null,
+    github_file_path: schema?.github_file_path || null,
+    github_repo_name: schema?.github_repo_name || null,
+    created_by: userId,
+  });
   if (insertError) {
     res.status(500).json({ error: insertError.message, api_usage });
     return;
@@ -1008,7 +1077,7 @@ app.post("/create_task", async (req: Request, res: Response): Promise<void> => {
 /**
  * Update task
  */
-app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/update_task", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -1036,9 +1105,9 @@ app.post("/update_task", async (req: Request, res: Response): Promise<void> => {
   }
 
   const patch = buildTaskUpdatePatch(schema);
-  if (schema?.board) {
-    patch.board = toLiveBoardStatusKey(String(schema.board));
-  }
+  const routing = await routingForRequest(db, workspaceId, schema, res, task);
+  if (!routing) return;
+  Object.assign(patch, routing);
 
   if (Object.keys(patch).length === 0) {
     res.json({ data: task, api_usage });
@@ -1196,12 +1265,12 @@ app.post(
   }
 );
 
-registerAddContextToTaskEndpoint(app);
+registerAddContextToTaskEndpoint(app, (path, handler) => remoteDispatcher.register(app, path, handler));
 
 /**
  * Add Comment to Task
  */
-app.post("/add_comment", async (req: Request, res: Response): Promise<void> => {
+remoteDispatcher.register(app, "/add_comment", async (req: Request, res: Response): Promise<void> => {
   const auth = await authorizeMcpRequest(req);
   if (!auth.ok) {
     res.status(auth.status).json(auth.body);
@@ -1656,7 +1725,7 @@ app.post("/mint_agent", async (req: Request, res: Response): Promise<void> => {
   });
 });
 
-app.listen(PORT, () => {
+export const httpServer = app.listen(PORT, process.env.HOST || "0.0.0.0", () => {
   // eslint-disable-next-line no-console
   console.log(`Privileged middleware server running on port ${PORT}`);
 });

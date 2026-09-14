@@ -3,4 +3,7 @@ node_modules
 dist
 .npmrc
 .mcp.json
+*.local.ts
+*.local.mjs
+.audit/
 CLAUDE.md

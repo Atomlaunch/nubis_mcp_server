@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Resolve Nubis workspace + API key at request time.
  *
@@ -11,9 +10,6 @@
  * - Agent principal key: NUBIS_AGENT_KEY / --agent-key (nubis_ag_…)
  * Both set is a hard error so a human key cannot silently shadow an agent.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.argvFlag = argvFlag;
-exports.resolveClientCredentials = resolveClientCredentials;
 const WORKSPACE_ENV_VARS = [
     "NUBIS_WORKSPACE_ID",
     "NUBIS_WORKSPACEID",
@@ -40,7 +36,7 @@ function firstEnv(env, keys) {
  * Read `--flag value` or `--flag=value` from argv. Values that look like
  * another flag are ignored so a bare `--workspaceID --access-token` is empty.
  */
-function argvFlag(flag, argv) {
+export function argvFlag(flag, argv) {
     const eqPrefix = `${flag}=`;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
@@ -56,7 +52,7 @@ function argvFlag(flag, argv) {
     }
     return "";
 }
-function resolveClientCredentials(sources = {}) {
+export function resolveClientCredentials(sources = {}) {
     const env = sources.env ?? process.env;
     const argv = sources.argv ?? process.argv;
     const workspaceId = argvFlag("--workspaceID", argv) || firstEnv(env, WORKSPACE_ENV_VARS);
