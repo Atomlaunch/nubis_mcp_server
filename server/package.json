@@ -7,7 +7,7 @@
     "dev": "npx tsx watch index.ts",
     "start": "node dist/server/index.js",
     "build": "tsc",
-    "test": "npm run build && tsx request-auth.test.ts && tsx broker-identity.test.ts && tsx consent-ui.test.ts && tsx boards.test.ts && tsx task-patches.test.ts && tsx task-create.test.ts && tsx workflows.test.ts && tsx remote-mcp.test.ts && tsx runtime-smoke.test.ts && tsx legacy-http.test.ts",
+    "test": "npm run build && tsx request-auth.test.ts && tsx broker-identity.test.ts && tsx consent-ui.test.ts && tsx boards.test.ts && tsx task-patches.test.ts && tsx task-create.test.ts && tsx workflows.test.ts && tsx remote-mcp.test.ts && tsx runtime-smoke.test.ts && tsx legacy-http.test.ts && tsx dcr-native.test.ts",
     "test:broker": "tsx oauth-broker.test.ts",
     "test:hosted": "tsx hosted-entry.test.ts",
     "test:writes": "tsx write-integration.test.ts",
