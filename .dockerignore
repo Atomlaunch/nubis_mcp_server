@@ -1,0 +1,19 @@
+# Allow only manifests and runtime source. No env, credentials, local harnesses or tests.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!src/
+!src/**/
+!src/**/*.ts
+!server/
+!server/**/
+!server/**/*.ts
+!server/package.json
+!server/package-lock.json
+!server/tsconfig.json
+**/node_modules/**
+**/dist/**
+**/*.test.ts
+**/*.local.ts
+**/.*

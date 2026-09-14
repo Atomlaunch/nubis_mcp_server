@@ -8,9 +8,9 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "..",
     "declaration": true
   },
-  "include": ["*.ts", "endpoints/**/*.ts"],
+  "include": ["*.ts", "endpoints/**/*.ts", "../src/tools.ts"],
   "exclude": ["node_modules", "*.test.ts"]
 }

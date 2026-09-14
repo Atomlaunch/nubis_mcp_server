@@ -8,7 +8,15 @@ export type DeleteTaskBody = {
   taskIDs?: unknown;
 };
 
-export type AuthKind = "workspace_api_key" | "agent_key" | "agent_jwt";
+export type AuthKind = "workspace_api_key" | "agent_key" | "agent_jwt" | "human_oauth";
+
+/** Decode only to reject OAuth tokens on legacy routes; never use this to authorize. */
+export function isOAuthToken(secret: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(secret.split(".")[1] ?? "", "base64url").toString("utf8"));
+    return Boolean(payload && ("client_id" in payload || "mcp_grant_id" in payload || payload.role === "nubis_mcp"));
+  } catch { return false; }
+}
 
 export const AGENT_KEY_PREFIX = "nubis_ag_";
 

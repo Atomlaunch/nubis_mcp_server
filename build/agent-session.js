@@ -1,21 +1,15 @@
-"use strict";
 /**
  * Agent session middleware (not an MCP tool).
  * Exchanges NUBIS_AGENT_KEY for a GoTrue JWT via POST /agent-session and
  * caches it in process memory. Subsequent tool POSTs send Bearer JWT only.
  * Edge `agent-token` is password grant — not generateLink / magic-link.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearAgentSessionCache = clearAgentSessionCache;
-exports.exchangeAgentSession = exchangeAgentSession;
-exports.getAgentAccessToken = getAgentAccessToken;
-exports.invalidateAgentSession = invalidateAgentSession;
-const credentials_js_1 = require("./credentials.js");
+import { resolveClientCredentials } from "./credentials.js";
 const MCP_BASE_URL = "https://mcp-server.nubis.app";
 const REFRESH_SKEW_MS = 30_000;
 let cached = null;
 let inFlight = null;
-function clearAgentSessionCache() {
+export function clearAgentSessionCache() {
     cached = null;
 }
 function sessionFromPayload(payload) {
@@ -53,7 +47,7 @@ function formatNotWired(status, body) {
     }
     return `Agent session failed (${status}): ${message}`;
 }
-async function exchangeAgentSession(fetchImpl, agentKey) {
+export async function exchangeAgentSession(fetchImpl, agentKey) {
     const response = await fetchImpl(`${MCP_BASE_URL}/agent-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,8 +65,8 @@ async function exchangeAgentSession(fetchImpl, agentKey) {
     }
     return sessionFromPayload((payload || {}));
 }
-async function getAgentAccessToken(fetchImpl) {
-    const creds = (0, credentials_js_1.resolveClientCredentials)();
+export async function getAgentAccessToken(fetchImpl) {
+    const creds = resolveClientCredentials();
     if (creds.authKind !== "agent_key") {
         throw new Error("getAgentAccessToken requires NUBIS_AGENT_KEY");
     }
@@ -87,6 +81,6 @@ async function getAgentAccessToken(fetchImpl) {
     cached = await inFlight;
     return cached.accessToken;
 }
-function invalidateAgentSession() {
+export function invalidateAgentSession() {
     cached = null;
 }
