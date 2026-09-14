@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="https://fb73ar500x.ufs.sh/f/veGH9J4eGYxyDrdSBt9qo9xvmbjUeMY0s3BHGZhap5LyrEuW" />
+    <link rel="apple-touch-icon" sizes="180x180" href="https://fb73ar500x.ufs.sh/f/veGH9J4eGYxyDrdSBt9qo9xvmbjUeMY0s3BHGZhap5LyrEuW">
+    <link rel="icon" type="image/png" sizes="32x32" href="https://fb73ar500x.ufs.sh/f/veGH9J4eGYxyDrdSBt9qo9xvmbjUeMY0s3BHGZhap5LyrEuW">
+    <link rel="icon" type="image/png" sizes="16x16" href="https://fb73ar500x.ufs.sh/f/veGH9J4eGYxyDrdSBt9qo9xvmbjUeMY0s3BHGZhap5LyrEuW">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nubis</title>
+    <script>
+      (function () {
+        try {
+          var theme = "system";
+          var raw = localStorage.getItem("theme-storage");
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            var stored = parsed && parsed.state && parsed.state.theme;
+            if (stored === "summer") stored = "light";
+            if (stored === "summer-night") stored = "dark";
+            if (stored === "light" || stored === "dark" || stored === "system") {
+              theme = stored;
+            }
+          }
+          var scheme = theme;
+          if (theme === "system") {
+            scheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          document.documentElement.dataset.theme = scheme;
+          document.documentElement.dataset.themePreference = theme;
+          document.documentElement.style.colorScheme = scheme;
+          document.documentElement.classList.toggle("dark", scheme === "dark");
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-BO5H17Kp.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-zc49n3NY.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
