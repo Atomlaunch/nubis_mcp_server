@@ -298,6 +298,30 @@ try {
     `${base}/oauth`,
   );
   const registration = await registerClient();
+  const correlationUrl = new URL(discovery.authorization_endpoint);
+  correlationUrl.search = new URLSearchParams({
+    client_id: registration.client_id, redirect_uri: `${base}/client/callback`,
+    response_type: "code", scope: "nubis.tasks.read", resource,
+    code_challenge: createHash("sha256").update(randomBytes(32)).digest("base64url"),
+    code_challenge_method: "S256",
+  }).toString();
+  const started = await context.request.get(correlationUrl.href, { maxRedirects: 0 });
+  const correlationInteraction = started.headers().location;
+  const correlationDetails = await (await context.request.get(correlationInteraction)).json();
+  identity.authorizationPage = async () => `${base}/oauth/consent?authorization_id=correlated-authorization-fixture`;
+  const correlationLogin = await context.request.post(`${correlationInteraction}/login`, { data: { csrf: correlationDetails.csrf } });
+  const correlationEntry = (await correlationLogin.json()).redirectTo;
+  const correlationPage = await context.request.get(correlationEntry, { maxRedirects: 0 });
+  assert.equal(correlationPage.status(), 303);
+  const correlationDestination = new URL(correlationPage.headers().location);
+  const brokerState = correlationDestination.searchParams.get("broker_state")!;
+  assert.ok(brokerState);
+  const validationUrl = `${base}/connect/login/validate?state=${encodeURIComponent(brokerState)}&authorization_id=correlated-authorization-fixture`;
+  assert.equal((await context.request.get(validationUrl)).status(), 200);
+  assert.equal((await fetch(validationUrl)).status, 400, "correlation requires the originating browser cookie");
+  assert.equal((await context.request.get(validationUrl.replace("correlated-authorization-fixture", "foreign-authorization-fixture"))).status(), 400);
+  assert.equal((await context.request.get(validationUrl, { headers: { Origin: "https://evil.example.test" } })).status(), 403);
+  identity.authorizationPage = undefined;
   const permanentClient = await pool.query(
     "select expires_at = 'infinity'::timestamptz as permanent from nubis_broker.artifacts where kind='Client' and id=$1",
     [registration.client_id],

@@ -277,7 +277,26 @@ export async function createOAuthBroker(options: BrokerOptions) {
             { ...login, authorizationPage: page },
             600,
           );
-        res.redirect(303, page);
+        const destination = new URL(page);
+        destination.searchParams.set("broker_state", state);
+        res.redirect(303, destination.href);
+      }),
+    );
+    app.get(
+      "/connect/login/validate",
+      wrap(async (req, res) => {
+        const state = typeof req.query.state === "string" ? req.query.state : "";
+        const id = typeof req.query.authorization_id === "string" ? req.query.authorization_id : "";
+        const login = (await loginArtifact.find(state)) as
+          | { proof: string; authorizationPage?: string; consumed?: number }
+          | undefined;
+        const proof = cookies(req)[`nubis_login_${state}`];
+        if (!login || login.consumed || !login.authorizationPage ||
+            typeof proof !== "string" || !equal(proof, login.proof) ||
+            new URL(login.authorizationPage).searchParams.get("authorization_id") !== id) {
+          throw new Error("Uncorrelated upstream authorization");
+        }
+        res.json({ valid: true });
       }),
     );
     app.get(
