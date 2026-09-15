@@ -11,7 +11,7 @@ import { chromium, type BrowserContext } from "@playwright/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { BrokerStore } from "./broker-store.js";
-import { createOAuthBroker } from "./oauth-broker.js";
+import { CONNECTION_TTL_SECONDS, createOAuthBroker } from "./oauth-broker.js";
 import { registerRemoteMcp } from "./remote-mcp.js";
 import type { BrokerIdentity } from "./broker-identity.js";
 
@@ -414,6 +414,11 @@ try {
   assert.equal(bTokens.status, 200, bTokens.data.error_description);
   const aTokens = await exchange(a, aRedirect.searchParams.get("code")!);
   assert.equal(aTokens.status, 200, aTokens.data.error_description);
+  assert.ok(
+    aTokens.data.expires_in >= CONNECTION_TTL_SECONDS - 60 &&
+      aTokens.data.expires_in <= CONNECTION_TTL_SECONDS,
+    "MCP access tokens last the grant, not a 5-minute cut",
+  );
   assert.notEqual(aTokens.data.access_token, "upstream-private-access");
   assert.ok(!JSON.stringify(aTokens.data).includes("upstream-private"));
   const [aClient, bClient] = await Promise.all([
@@ -534,7 +539,47 @@ try {
     workspaces[1].id,
     "revocation must not affect the other connection",
   );
+  const reconnect = await begin(registration.client_id);
+  assert.ok(
+    reconnect.details.existingConnections.some(
+      (row: { workspaceId: string; scopes: string[] }) =>
+        row.workspaceId === workspaces[1].id &&
+        row.scopes.includes("nubis.tasks.read"),
+    ),
+    "re-auth must show the current grant so the user sees what the agent already has",
+  );
+  assert.ok(
+    !reconnect.details.existingConnections.some(
+      (row: { workspaceId: string }) => row.workspaceId === workspaces[0].id,
+    ),
+    "revoked connections must not appear as current grants",
+  );
+  const reconnectWorkspace = reconnect.details.workspaces.find(
+    (row: { id: string }) => row.id === workspaces[1].id,
+  );
+  assert.deepEqual(reconnectWorkspace?.currentScopes, ["nubis.tasks.read"]);
+  assert.ok(reconnect.details.requestedScopes.includes("nubis.tasks.read"));
+  const reconnectRedirect = await decide(reconnect, workspaces[1].id);
+  const reconnectTokens = await exchange(
+    reconnect,
+    reconnectRedirect.searchParams.get("code")!,
+  );
+  assert.equal(reconnectTokens.status, 200, reconnectTokens.data.error_description);
+  await assert.rejects(
+    broker.remote.authorize(bTokens.data.access_token),
+    "same-workspace re-auth must revoke the previous grant",
+  );
+  assert.equal(
+    (await broker.remote.authorize(reconnectTokens.data.access_token)).workspaceId,
+    workspaces[1].id,
+  );
+  assert.equal(
+    (await refresh(registration.client_id, bTokens.data.refresh_token)).status,
+    400,
+    "superseded refresh token cannot be reused",
+  );
   memberships = [];
+  await assert.rejects(broker.remote.authorize(reconnectTokens.data.access_token));
   await assert.rejects(broker.remote.authorize(bTokens.data.access_token));
   assert.equal(refreshes, 0);
   await assert.rejects(

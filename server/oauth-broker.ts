@@ -20,7 +20,9 @@ export type BrokerOptions = {
   managementOrigin?: string;
   execute: RemoteMcpConfig["execute"];
 };
-const ttl = 30 * 86400;
+/** Grant, refresh, and MCP access-token lifetime. MCP clients often cannot refresh on a short timer. */
+export const CONNECTION_TTL_SECONDS = 30 * 86400;
+const ttl = CONNECTION_TTL_SECONDS;
 const secret = () => randomBytes(32).toString("base64url");
 const equal = (left: string, right: string) =>
   left.length === right.length &&
@@ -75,7 +77,7 @@ export async function createOAuthBroker(options: BrokerOptions) {
             scope: MCP_SCOPES.join(" "),
             audience: resource.href,
             accessTokenFormat: "opaque",
-            accessTokenTTL: 300,
+            accessTokenTTL: ttl,
           };
         },
       },
@@ -93,7 +95,7 @@ export async function createOAuthBroker(options: BrokerOptions) {
       grant_types: ["authorization_code", "refresh_token"],
     },
     ttl: {
-      AccessToken: 300,
+      AccessToken: ttl,
       AuthorizationCode: 60,
       Interaction: 600,
       Grant: ttl,
@@ -192,14 +194,29 @@ export async function createOAuthBroker(options: BrokerOptions) {
           );
           return;
         }
-        const client = await provider.Client.find(
-          String(detail.params.client_id),
-        );
+        const clientId = String(detail.params.client_id);
+        const client = await provider.Client.find(clientId);
         const workspaces = state.upstream
           ? (await identity.workspaces(state.upstream)).filter((w) =>
               w.actions.includes("read"),
             )
           : [];
+        const existingConnections = state.upstream
+          ? (await store.list(state.upstream.userId, clientId)).map((row) => ({
+              workspaceId: String(row.workspace_id),
+              workspaceName: String(row.workspace_name),
+              scopes: Array.isArray(row.scopes) ? row.scopes : [],
+              expiresAt:
+                row.expires_at instanceof Date
+                  ? row.expires_at.toISOString()
+                  : String(row.expires_at),
+            }))
+          : [];
+        const requestedScopes = String(detail.params.scope ?? "")
+          .split(" ")
+          .filter((scope) =>
+            (MCP_SCOPES as readonly string[]).includes(scope),
+          );
         res.json({
           interactionId: detail.uid,
           clientName: client?.clientName ?? "MCP client",
@@ -209,12 +226,12 @@ export async function createOAuthBroker(options: BrokerOptions) {
             id: w.id,
             name: w.name,
             canWrite: w.actions.some((a) => a === "create" || a === "update"),
+            currentScopes:
+              existingConnections.find((c) => c.workspaceId === w.id)?.scopes ??
+              [],
           })),
-          requestedScopes: String(detail.params.scope ?? "")
-            .split(" ")
-            .filter((scope) =>
-              (MCP_SCOPES as readonly string[]).includes(scope),
-            ),
+          requestedScopes,
+          existingConnections,
         });
       }),
     );

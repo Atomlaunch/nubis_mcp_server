@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS nubis_broker.connections (
 );
 ALTER TABLE nubis_broker.connections ADD COLUMN IF NOT EXISTS refresh_pending boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS broker_connections_user ON nubis_broker.connections (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS broker_one_live_connection
+  ON nubis_broker.connections (user_id, client_id, workspace_id)
+  WHERE revoked_at IS NULL;
 CREATE OR REPLACE FUNCTION nubis_broker.immutable_connection_binding()
 RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN

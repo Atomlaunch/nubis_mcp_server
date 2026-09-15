@@ -21,8 +21,12 @@ disabled-feature smoke checks, excluding private configuration and local harness
   OAuth client gives the broker its own Supabase session; it never copies the
   SPA's refresh token or races the browser's token rotation.
 - The broker owns the exact interaction, authorization code, grant, and refresh
-  family. Each consent creates a new grant, even for the same human/client.
-- The connection's user/client/workspace binding is immutable, including in SQL.
+  family. Consent is never skipped. Re-auth to the same workspace is allowed and
+  replaces the previous live grant for that user/client/workspace so the human
+  sees what the agent is requesting. Other workspaces stay untouched.
+- Consent JSON includes `requestedScopes`, `existingConnections`, and per-workspace
+  `currentScopes`. The connection's user/client/workspace binding is immutable,
+  including in SQL.
 - MCP clients receive opaque broker tokens, never upstream Supabase credentials.
 - All upstream credentials and protocol artifacts are AES-256-GCM encrypted in
   the dedicated broker database, with record-bound authenticated context.
@@ -40,7 +44,9 @@ disabled-feature smoke checks, excluding private configuration and local harness
   refresh result; that connection must sign in again instead.
 - The broker uses PKCE S256, exact redirect matching, resource audiences, signed
   cookies, CSRF tokens, fixed discovery URLs, Host/Origin validation, and rate limits.
-  Resource tokens last five minutes; connection grants last at most 30 days.
+  MCP access tokens last the connection grant (30 days). A five-minute
+  access-token cut is not used; MCP clients often cannot refresh on that cadence.
+  Revocation and live membership checks still apply.
 
 The earlier direct Supabase token-hook design is superseded. No custom Supabase
 JWT role, `pm_mcp_grants` table, or Supabase token hook is needed for this broker.
@@ -52,7 +58,9 @@ configuration now wires the broker, not that verifier.
 1. Review the authorization change and record the user-owned ADR.
 2. Provision a **dedicated broker PostgreSQL database**, not the Nubis production
    Supabase database. Human applies
-   `docs/database/20260914090000_oauth_broker.sql` with a server-only database login.
+   `docs/database/20260914090000_oauth_broker.sql` and
+   `docs/database/20260915120000_oauth_broker_one_live_connection.sql` with a
+   server-only database login.
 3. Configure Supabase OAuth Server with a confidential upstream client using
    `token_endpoint_auth_method=client_secret_post` (not the default Basic). Its exact
    redirect URI is `https://<broker-host>/connect/callback/upstream`; scopes are
@@ -112,7 +120,8 @@ DB first. Chromium defaults to `/usr/bin/chromium`; override with
 Screenshot proof is local at `/tmp/nubis-oauth-consent-proof.png`, not committed.
 
 Covered: rendered sign-in/consent/approval, concurrent A/B connections for the same
-user/client with reverse code exchange, foreign workspace rejection, CSRF, denied
+user/client with reverse code exchange, same-workspace re-auth that supersedes the
+previous grant, foreign workspace rejection, CSRF, denied
 consent, wrong PKCE, code and refresh-token replay, refresh isolation, read-only role, encrypted
 storage, Settings revocation, removal of membership, immutable SQL binding,
 serialized upstream refresh, interrupted-refresh denial, atomic code consumption,

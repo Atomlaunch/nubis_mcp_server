@@ -21,6 +21,15 @@ export type BrokerConnection = {
   expiresAt: number;
   revokedAt: string | null;
 };
+export type ListedConnection = {
+  grant_id: string;
+  client_name: string;
+  workspace_id: string;
+  workspace_name: string;
+  scopes: string[];
+  created_at: Date;
+  expires_at: Date;
+};
 
 /** Auth artifacts and upstream refresh tokens are encrypted, including backups. */
 export class BrokerStore {
@@ -129,23 +138,58 @@ export class BrokerStore {
     return payload;
   }
   async saveConnection(connection: BrokerConnection): Promise<void> {
-    await this.pool.query(
-      `insert into nubis_broker.connections
-      (grant_id,interaction_id,user_id,client_id,workspace_id,client_name,workspace_name,scopes,upstream_session,expires_at)
-      values($1,$2,$3,$4,$5,$6,$7,$8,$9,to_timestamp($10))`,
-      [
-        connection.grantId,
-        connection.interactionId,
-        connection.userId,
-        connection.clientId,
-        connection.workspaceId,
-        connection.clientName,
-        connection.workspaceName,
-        connection.scopes,
-        this.seal(connection.session, connection.grantId),
-        connection.expiresAt,
-      ],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const previous = await client.query(
+        `select grant_id from nubis_broker.connections
+         where user_id=$1 and client_id=$2 and workspace_id=$3
+           and grant_id<>$4 and revoked_at is null
+         for update`,
+        [
+          connection.userId,
+          connection.clientId,
+          connection.workspaceId,
+          connection.grantId,
+        ],
+      );
+      const previousIds = previous.rows.map((row: { grant_id: string }) => row.grant_id);
+      if (previousIds.length) {
+        await client.query(
+          `update nubis_broker.connections set revoked_at=coalesce(revoked_at,now())
+           where grant_id=any($1::text[])`,
+          [previousIds],
+        );
+        await client.query(
+          `update nubis_broker.artifacts set revoked_at=coalesce(revoked_at,now())
+           where grant_id=any($1::text[]) or (kind='Grant' and id=any($1::text[]))`,
+          [previousIds],
+        );
+      }
+      await client.query(
+        `insert into nubis_broker.connections
+        (grant_id,interaction_id,user_id,client_id,workspace_id,client_name,workspace_name,scopes,upstream_session,expires_at)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,to_timestamp($10))`,
+        [
+          connection.grantId,
+          connection.interactionId,
+          connection.userId,
+          connection.clientId,
+          connection.workspaceId,
+          connection.clientName,
+          connection.workspaceName,
+          connection.scopes,
+          this.seal(connection.session, connection.grantId),
+          connection.expiresAt,
+        ],
+      );
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async connection(grantId: string): Promise<BrokerConnection | null> {
     const { rows } = await this.pool.query(
@@ -169,11 +213,18 @@ export class BrokerStore {
       revokedAt: row.revoked_at,
     };
   }
-  async list(userId: string) {
-    const { rows } = await this.pool.query(
-      `select grant_id,client_name,workspace_id,workspace_name,scopes,created_at,expires_at
-      from nubis_broker.connections where user_id=$1 and revoked_at is null and expires_at>now() order by created_at desc`,
-      [userId],
+  async list(userId: string, clientId?: string): Promise<ListedConnection[]> {
+    const { rows } = await this.pool.query<ListedConnection>(
+      clientId
+        ? `select grant_id,client_name,workspace_id,workspace_name,scopes,created_at,expires_at
+           from nubis_broker.connections
+           where user_id=$1 and client_id=$2 and revoked_at is null and expires_at>now()
+           order by created_at desc`
+        : `select grant_id,client_name,workspace_id,workspace_name,scopes,created_at,expires_at
+           from nubis_broker.connections
+           where user_id=$1 and revoked_at is null and expires_at>now()
+           order by created_at desc`,
+      clientId ? [userId, clientId] : [userId],
     );
     return rows; // Never return encrypted or plaintext credentials to Settings.
   }

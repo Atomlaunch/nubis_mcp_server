@@ -34,6 +34,7 @@ export function registerConsentUi(
   );
   app.get(
     [
+      "/",
       "/login",
       "/auth/callback",
       "/oauth/consent",
