@@ -31,6 +31,7 @@ await once(server, "listening");
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 try {
   const paths = [
+    "/",
     "/mcp/connect",
     "/oauth/consent",
     "/login",
@@ -46,7 +47,7 @@ try {
   const responses = await Promise.all(paths.map((path) => fetch(base + path)));
   assert.deepEqual(
     responses.map((r) => r.status),
-    [200, 200, 200, 200, 418, 404, 404, 404, 403, 200, 404],
+    [200, 200, 200, 200, 200, 418, 404, 404, 404, 403, 200, 404],
   );
   const policy = responses[0].headers.get("content-security-policy")!;
   assert.ok(policy.includes("frame-ancestors 'none'"));

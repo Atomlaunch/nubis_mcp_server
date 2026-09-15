@@ -16,6 +16,8 @@ COPY package.json package-lock.json ./
 COPY server/package.json server/package-lock.json ./server/
 RUN npm ci --omit=dev --ignore-scripts && npm --prefix server ci --omit=dev --ignore-scripts
 COPY --from=build --chown=node:node /app/server/dist ./server/dist
+COPY consent-ui ./consent-ui
+ENV NUBIS_CONSENT_UI_DIR=/app/consent-ui
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
